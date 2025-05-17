@@ -1,7 +1,9 @@
 (ns app.core
   (:require
    [coffi.mem :as mem]
-   [coffi.ffi :as ffi :refer [defcfn]]))
+   [coffi.ffi :as ffi :refer [defcfn]])
+  (:import
+   (java.util.concurrent Semaphore)))
 
 (ffi/load-library "resources/sqlite3.so")
 
@@ -25,16 +27,17 @@
   [::mem/pointer] ::mem/int)
 
 (defn wrap-callback [callback]
-  (fn [_ c-n c-name c-text]
+  (fn [_ c-n c-text c-name]
     (callback
+      (mem/deserialize-from
+        (mem/reinterpret c-text
+          (mem/size-of [::mem/array ::mem/c-string c-n]))
+        [::mem/array ::mem/c-string c-n])
       (mem/deserialize-from
         (mem/reinterpret c-name
           (mem/size-of [::mem/array ::mem/c-string c-n]))
         [::mem/array ::mem/c-string c-n])
-      (mem/deserialize-from
-        (mem/reinterpret c-text
-          (mem/size-of [::mem/array ::mem/c-string c-n]))
-        [::mem/array ::mem/c-string c-n]))
+      )
     0))
 
 (defcfn sqlite3-exec
@@ -61,36 +64,66 @@
             {:error
              (mem/deserialize-from errmsg-ptr ::mem/c-string)}))))))
 
+(defn new-conn! [db-name]
+  (let [*pdb (sqlite3-open db-name)]
+    (sqlite3-exec *pdb
+      (str
+        "pragma cache_size = 15625;"
+        "pragma page_size = 4096;"
+        "pragma journal_mode = WAL;"
+        "pragma synchronous = NORMAL;"
+        "pragma temp_store = MEMORY;"
+        "pragma foreign_keys = false;")
+      (fn [_ _]))
+    *pdb))
+
+(defn init-db! [db-name & [{:keys [pool-size] :or {pool-size 4}}]]
+  (let [conns (into '() (repeatedly pool-size
+                          (fn [] (new-conn! db-name))))]
+    {:conns         conns
+     :conn-pool     (atom conns)
+     :conn-pool-sem (Semaphore/new (count conns) true)}))
+
+(defn take-conn! [conn-pool]
+  (let [[[conn]] (swap-vals! conn-pool pop)]
+    conn))
+
+(defn return-conn! [conn-pool conn]
+  (swap! conn-pool conj conn))
+
+(defn q [{:keys [conn-pool conn-pool-sem]} query callback]
+  (Semaphore/.acquire conn-pool-sem)
+  (let [conn (take-conn! conn-pool)]
+    (try
+      (sqlite3-exec conn query callback)
+      (finally
+        (return-conn! conn-pool conn)
+        (Semaphore/.release conn-pool-sem)))))
+
+(defonce db (init-db! "database.db" {:pool-size 4}))
+
 (comment
 
-  (def *pdb (sqlite3-open "database.db"))
-  (sqlite3-exec *pdb
-    (str      
-      "pragma cache_size = 15625;"
-      "pragma page_size = 4096;"
-      "pragma journal_mode = WAL;"
-      "pragma synchronous = NORMAL;"
-      "pragma temp_store = MEMORY;")
-    (fn [_ _]))
 
-  (sqlite3-exec *pdb
-    (str      
-      "pragma cache_size;"
-      "pragma page_size;"
-      "pragma journal_mode;"
-      "pragma synchronous;"
-      "pragma temp_store;"
-      "pragma mmap_size;")
-    (fn [c-name c-text]
-      (prn [c-text c-name])))
-  
-  ;; jdbc no pool:  191.458653 µs
-  ;; raw no pool:    26.324366 µs
-  ;; jdbc with pool: 13.057478 µs
-  
+  ;; for big query
+  ;; jdbc no pool   time mean : 462.744229 µs
+  ;; jdbc with pool time mean : 215.338314 µs
+
+  ;; no prepared statement
+  ;; raw no pool time mean : 546.519174 µs
+
+  (time
+    (->> (mapv
+           (fn [n]
+             (future
+               (q mad-db "SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934) GROUP BY chunk_id"
+                 (fn [c-text c-name]))))
+           (range 0 50000))
+      (run! (fn [x] @x))))
+
   (user/bench
-    (sqlite3-exec *pdb "PRAGMA table_list;"
-      (fn [_ _] )))
+    (q db "SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934) GROUP BY chunk_id"
+      (fn [c-text c-name])))
 
   )
 
