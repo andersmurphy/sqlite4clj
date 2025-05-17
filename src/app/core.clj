@@ -104,13 +104,7 @@
 
 (comment
 
-
-  ;; for big query
-  ;; jdbc no pool   time mean : 462.744229 µs
-  ;; jdbc with pool time mean : 215.338314 µs
-
-  ;; no prepared statement
-  ;; raw no pool time mean : 546.519174 µs
+  (q db "pragma compile_options" (fn [c-text _] (prn c-text)))
 
   (time
     (->> (mapv
@@ -124,6 +118,15 @@
   (user/bench
     (q db "SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934) GROUP BY chunk_id"
       (fn [c-text c-name])))
+
+  ;; Utility
+  ;; ENABLE_MATH_FUNCTIONS
+  ;; ENABLE_COLUMN_METADATA
+  ;; ENABLE_FTS5
+  ;; ENABLE_RTREE
+  ;; ENABLE_LOAD_EXTENSION
+
+  
 
   )
 

@@ -1,3 +1,26 @@
 ## Building SQLITE from source
 
 See this [blog post](https://andersmurphy.com/2023/07/09/sqlite-building-from-source-on-macos.html) .
+
+```
+gcc -Os -I. -DSQLITE_DQS=0 \
+   -DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1 \
+   -DSQLITE_DEFAULT_MEMSTATUS=0 \
+   -DSQLITE_LIKE_DOESNT_MATCH_BLOBS \
+   -DSQLITE_OMIT_DEPRECATED \
+   -DSQLITE_OMIT_PROGRESS_CALLBACK \
+   -DSQLITE_OMIT_SHARED_CACHE \
+   -DSQLITE_DISABLE_PAGECACHE_OVERFLOW_STATS \
+   -DSQLITE_ENABLE_STAT4 \
+   -DSQLITE_USE_ALLOCA \
+   -DSQLITE_STRICT_SUBTYPE=1 \
+   -DSQLITE_MAX_EXPR_DEPTH=0 \
+   shell.c sqlite3.c -lpthread -ldl -lm -o sqlite3
+```
+
+```
+-DSQLITE_OMIT_DECLTYPE
+-DSQLITE_OMIT_AUTOINIT
+```
+
+
