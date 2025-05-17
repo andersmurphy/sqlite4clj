@@ -28,15 +28,18 @@
 
 (defn wrap-callback [callback]
   (fn [_ c-n c-text c-name]
-    (callback
-      (mem/deserialize-from
-        (mem/reinterpret c-text
-          (mem/size-of [::mem/array ::mem/c-string c-n]))
-        [::mem/array ::mem/c-string c-n])
-      (mem/deserialize-from
-        (mem/reinterpret c-name
-          (mem/size-of [::mem/array ::mem/c-string c-n]))
-        [::mem/array ::mem/c-string c-n]))
+    (try
+      (callback
+        (mem/deserialize-from
+          (mem/reinterpret c-name
+            (mem/size-of [::mem/array ::mem/c-string c-n]))
+          [::mem/array ::mem/c-string c-n])
+        (mem/deserialize-from
+          (mem/reinterpret c-text
+            (mem/size-of [::mem/array ::mem/c-string c-n]))
+          [::mem/array ::mem/c-string c-n]))
+      ;; TODO: make this better
+      (catch Exception _))
     0))
 
 (defcfn sqlite3-exec
@@ -91,11 +94,27 @@
 (defn return-conn! [conn-pool conn]
   (swap! conn-pool conj conn))
 
-(defn q [{:keys [conn-pool conn-pool-sem]} query callback]
+(defn zipmap-key-fn [key-fn keys vals]
+  (loop [map (transient {})
+         ks  (seq keys)
+         vs  (seq vals)]
+    (if (and ks vs)
+      (recur (assoc! map (key-fn (first ks)) (first vs))
+        (next ks)
+        (next vs))
+      (persistent! map))))
+
+(defn q [{:keys [conn-pool conn-pool-sem]} query row-builder]
   (Semaphore/.acquire conn-pool-sem)
-  (let [conn (take-conn! conn-pool)]
+  (let [conn   (take-conn! conn-pool)
+        result (atom (transient []))]
     (try
-      (sqlite3-exec conn query callback)
+      (sqlite3-exec conn query
+        (fn [row-keys row-vals]
+          (->> (zipmap-key-fn keyword row-keys row-vals)
+            (row-builder)
+            (swap! result conj!))))
+      (persistent! @result)
       (finally
         (return-conn! conn-pool conn)
         (Semaphore/.release conn-pool-sem)))))
@@ -111,7 +130,7 @@
           "pragma synchronous;"
           "pragma temp_store;"
           "pragma foreign_keys;")
-    (fn [c-text _] (prn c-text)))
+    (fn [row] row))
 
   (q db "pragma compile_options" (fn [c-text _] (prn c-text)))
 
@@ -120,13 +139,17 @@
            (fn [n]
              (future
                (q db "SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934) GROUP BY chunk_id"
-                 (fn [c-text c-name]))))
+                 (fn [row] row))))
            (range 0 2000))
       (run! (fn [x] @x))))
 
   (user/bench
+    (q db "SELECT chunk_id, state FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934)"
+      (fn [row] row)))
+
+  (user/bench
     (q db "SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934) GROUP BY chunk_id"
-      (fn [c-text c-name])))
+      (fn [row] row)))
 
   ;; Utility
   ;; ENABLE_MATH_FUNCTIONS
