@@ -36,8 +36,7 @@
       (mem/deserialize-from
         (mem/reinterpret c-name
           (mem/size-of [::mem/array ::mem/c-string c-n]))
-        [::mem/array ::mem/c-string c-n])
-      )
+        [::mem/array ::mem/c-string c-n]))
     0))
 
 (defcfn sqlite3-exec
@@ -82,7 +81,8 @@
                           (fn [] (new-conn! db-name))))]
     {:conns         conns
      :conn-pool     (atom conns)
-     :conn-pool-sem (Semaphore/new (count conns) true)}))
+     :conn-pool-sem (Semaphore/new (count conns) true)
+     :close         (fn [] (run! sqlite3-close conns))}))
 
 (defn take-conn! [conn-pool]
   (let [[[conn]] (swap-vals! conn-pool pop)]
@@ -116,9 +116,9 @@
     (->> (mapv
            (fn [n]
              (future
-               (q mad-db "SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934) GROUP BY chunk_id"
+               (q db "SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934) GROUP BY chunk_id"
                  (fn [c-text c-name]))))
-           (range 0 50000))
+           (range 0 2000))
       (run! (fn [x] @x))))
 
   (user/bench
