@@ -104,6 +104,15 @@
 
 (comment
 
+  (q db (str
+          "pragma cache_size;"
+          "pragma page_size;"
+          "pragma journal_mode;"
+          "pragma synchronous;"
+          "pragma temp_store;"
+          "pragma foreign_keys;")
+    (fn [c-text _] (prn c-text)))
+
   (q db "pragma compile_options" (fn [c-text _] (prn c-text)))
 
   (time
