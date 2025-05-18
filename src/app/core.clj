@@ -27,18 +27,13 @@
   [::mem/pointer] ::mem/int)
 
 (defn wrap-callback [callback]
-  (fn [_ c-n c-text c-name]
+  (fn [_ c-n c-text _c-name]
     (try
       (callback
-        (mem/deserialize-from
-          (mem/reinterpret c-name
-            (mem/size-of [::mem/array ::mem/c-string c-n]))
-          [::mem/array ::mem/c-string c-n])
         (mem/deserialize-from
           (mem/reinterpret c-text
             (mem/size-of [::mem/array ::mem/c-string c-n]))
           [::mem/array ::mem/c-string c-n]))
-      ;; TODO: make this better
       (catch Exception _))
     0))
 
@@ -94,25 +89,14 @@
 (defn return-conn! [conn-pool conn]
   (swap! conn-pool conj conn))
 
-(defn zipmap-key-fn [key-fn keys vals]
-  (loop [map (transient {})
-         ks  (seq keys)
-         vs  (seq vals)]
-    (if (and ks vs)
-      (recur (assoc! map (key-fn (first ks)) (first vs))
-        (next ks)
-        (next vs))
-      (persistent! map))))
-
 (defn q [{:keys [conn-pool conn-pool-sem]} query row-builder]
   (Semaphore/.acquire conn-pool-sem)
   (let [conn   (take-conn! conn-pool)
         result (atom (transient []))]
     (try
       (sqlite3-exec conn query
-        (fn [row-keys row-vals]
-          (->> (zipmap-key-fn keyword row-keys row-vals)
-            (row-builder)
+        (fn [row-vals]
+          (->> (row-builder row-vals)
             (swap! result conj!))))
       (persistent! @result)
       (finally
@@ -139,6 +123,15 @@
            (fn [n]
              (future
                (q db "SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934) GROUP BY chunk_id"
+                 (fn [row] row))))
+           (range 0 2000))
+      (run! (fn [x] @x))))
+
+  (time
+    (->> (mapv
+           (fn [n]
+             (future
+               (q db "SELECT chunk_id, state FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934)"
                  (fn [row] row))))
            (range 0 2000))
       (run! (fn [x] @x))))
