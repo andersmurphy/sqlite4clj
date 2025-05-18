@@ -90,13 +90,6 @@
     {:conn-pool  pool
      :close (fn [] (run! sqlite3-close conns))}))
 
-(defn take-conn! [conn-pool]
-  (let [[[conn]] (swap-vals! conn-pool pop)]
-    conn))
-
-(defn return-conn! [conn-pool conn]
-  (swap! conn-pool conj conn))
-
 (defn q [{:keys [conn-pool]} query row-builder]
   (let [conn   (LinkedBlockingQueue/.take conn-pool)
         result (atom (transient []))]
