@@ -3,7 +3,15 @@
    [coffi.mem :as mem]
    [coffi.ffi :as ffi :refer [defcfn]])
   (:import
-   (java.util.concurrent Semaphore)))
+   (java.util.concurrent LinkedBlockingQueue
+     Executors)))
+
+;; Make futures use virtual threads
+(set-agent-send-executor!
+  (Executors/newVirtualThreadPerTaskExecutor))
+
+(set-agent-send-off-executor!
+  (Executors/newVirtualThreadPerTaskExecutor))
 
 (ffi/load-library "resources/sqlite3.so")
 
@@ -75,12 +83,12 @@
     *pdb))
 
 (defn init-db! [db-name & [{:keys [pool-size] :or {pool-size 4}}]]
-  (let [conns (into '() (repeatedly pool-size
-                          (fn [] (new-conn! db-name))))]
-    {:conns         conns
-     :conn-pool     (atom conns)
-     :conn-pool-sem (Semaphore/new (count conns) true)
-     :close         (fn [] (run! sqlite3-close conns))}))
+  (let [conns (repeatedly pool-size
+                (fn [] (new-conn! db-name)))
+        pool  (LinkedBlockingQueue/new ^int pool-size)]
+    (run! #(LinkedBlockingQueue/.add pool %) conns)
+    {:conn-pool  pool
+     :close (fn [] (run! sqlite3-close conns))}))
 
 (defn take-conn! [conn-pool]
   (let [[[conn]] (swap-vals! conn-pool pop)]
@@ -89,9 +97,8 @@
 (defn return-conn! [conn-pool conn]
   (swap! conn-pool conj conn))
 
-(defn q [{:keys [conn-pool conn-pool-sem]} query row-builder]
-  (Semaphore/.acquire conn-pool-sem)
-  (let [conn   (take-conn! conn-pool)
+(defn q [{:keys [conn-pool]} query row-builder]
+  (let [conn   (LinkedBlockingQueue/.take conn-pool)
         result (atom (transient []))]
     (try
       (sqlite3-exec conn query
@@ -100,8 +107,7 @@
             (swap! result conj!))))
       (persistent! @result)
       (finally
-        (return-conn! conn-pool conn)
-        (Semaphore/.release conn-pool-sem)))))
+        (LinkedBlockingQueue/.offer conn-pool conn)))))
 
 (defonce db (init-db! "database.db" {:pool-size 4}))
 
@@ -115,8 +121,6 @@
           "pragma temp_store;"
           "pragma foreign_keys;")
     (fn [row] row))
-
-  (q db "pragma compile_options" (fn [c-text _] (prn c-text)))
 
   (time
     (->> (mapv
