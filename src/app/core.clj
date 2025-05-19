@@ -19,13 +19,14 @@
 (defn sqlite-ok? [code]
   (= code 0))
 
-(defcfn sqlite3-open
-  "sqlite3_open" [::mem/c-string ::mem/pointer] ::mem/int
+(defcfn sqlite3-open-v2
+  "sqlite3_open_v2" [::mem/c-string ::mem/pointer ::mem/int
+                     ::mem/c-string] ::mem/int
   sqlite3-open-native
-  [filename]
+  [filename flags]
   (with-open [arena (mem/confined-arena)]
     (let [pdb    (mem/alloc-instance ::mem/pointer arena)
-          result (sqlite3-open-native filename pdb)]
+          result (sqlite3-open-native filename pdb flags nil)]
       (if (sqlite-ok? result)
         (mem/deserialize-from pdb ::mem/pointer)
         (throw (ex-info "Failed to open sqlite3 database"
@@ -70,8 +71,13 @@
             {:error
              (mem/deserialize-from errmsg-ptr ::mem/c-string)}))))))
 
-(defn new-conn! [db-name]
-  (let [*pdb            (sqlite3-open db-name)
+(defn new-conn! [db-name read-only]
+  (let [flags           (if read-only
+                          ;; SQLITE_OPEN_READONLY
+                          0x00000001
+                          ;; SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
+                          (bit-or 0x00000002 0x00000004))
+        *pdb            (sqlite3-open-v2 db-name flags)
         statement-cache (cache/fifo-cache-factory {} :threshold 512)]
     (sqlite3-exec *pdb
       (str
@@ -85,9 +91,11 @@
     {:pdb             *pdb
      :statement-cache statement-cache}))
 
-(defn init-db! [db-name & [{:keys [pool-size] :or {pool-size 4}}]]
+(defn init-db!
+  [db-name & [{:keys [pool-size read-only]
+               :or   {pool-size 4}}]]
   (let [conns (repeatedly pool-size
-                (fn [] (new-conn! db-name)))
+                (fn [] (new-conn! db-name read-only)))
         pool  (LinkedBlockingQueue/new ^int pool-size)]
     (run! #(LinkedBlockingQueue/.add pool %) conns)
     {:conn-pool pool
@@ -106,7 +114,9 @@
       (finally
         (LinkedBlockingQueue/.offer conn-pool conn)))))
 
-(defonce db (init-db! "database.db" {:pool-size 4}))
+(defonce db (init-db! "database.db"
+              {:read-only true
+               :pool-size 4}))
 
 (comment
 
@@ -117,6 +127,10 @@
           "pragma synchronous;"
           "pragma temp_store;"
           "pragma foreign_keys;")
+    (fn [row] row))
+
+  (q db 
+    "INSERT INTO session (id, checks) VALUES ('foo', 1)"
     (fn [row] row))
 
   (time
