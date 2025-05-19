@@ -1,7 +1,8 @@
 (ns app.core
   (:require
    [coffi.mem :as mem]
-   [coffi.ffi :as ffi :refer [defcfn]])
+   [coffi.ffi :as ffi :refer [defcfn]]
+   [clojure.core.cache.wrapped :as cache])
   (:import
    (java.util.concurrent LinkedBlockingQueue
      Executors)))
@@ -70,7 +71,8 @@
              (mem/deserialize-from errmsg-ptr ::mem/c-string)}))))))
 
 (defn new-conn! [db-name]
-  (let [*pdb (sqlite3-open db-name)]
+  (let [*pdb            (sqlite3-open db-name)
+        statement-cache (cache/fifo-cache-factory {} :threshold 512)]
     (sqlite3-exec *pdb
       (str
         "pragma cache_size = 15625;"
@@ -80,24 +82,26 @@
         "pragma temp_store = MEMORY;"
         "pragma foreign_keys = false;")
       (fn [_ _]))
-    *pdb))
+    {:pdb             *pdb
+     :statement-cache statement-cache}))
 
 (defn init-db! [db-name & [{:keys [pool-size] :or {pool-size 4}}]]
   (let [conns (repeatedly pool-size
                 (fn [] (new-conn! db-name)))
         pool  (LinkedBlockingQueue/new ^int pool-size)]
     (run! #(LinkedBlockingQueue/.add pool %) conns)
-    {:conn-pool  pool
-     :close (fn [] (run! sqlite3-close conns))}))
+    {:conn-pool pool
+     :close
+     (fn [] (run! (fn [conn] (sqlite3-close (:pdb conn))) conns))}))
 
 (defn q [{:keys [conn-pool]} query row-builder]
   (let [conn   (LinkedBlockingQueue/.take conn-pool)
         result (atom (transient []))]
     (try
-      (sqlite3-exec conn query
+      (sqlite3-exec (:pdb conn) query
         (fn [row-vals]
-          (->> (row-builder row-vals)
-            (swap! result conj!))))
+          (swap! result conj! (row-builder row-vals))))
+      ;; reset prepared statement
       (persistent! @result)
       (finally
         (LinkedBlockingQueue/.offer conn-pool conn)))))
@@ -128,10 +132,14 @@
     (->> (mapv
            (fn [n]
              (future
-               (q db "SELECT chunk_id, state FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934)"
-                 (fn [row] row))))
+               (do
+                 (q db "SELECT chunk_id, state FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934)"
+                   (fn [row] row))
+                 nil)))
            (range 0 2000))
       (run! (fn [x] @x))))
+
+  
 
   (user/bench
     (q db "SELECT chunk_id, state FROM cell WHERE chunk_id IN (1978, 3955, 5932, 1979, 3956, 5933, 1980, 3957, 5934)"
@@ -151,6 +159,7 @@
   
 
   )
+
 
 
 
