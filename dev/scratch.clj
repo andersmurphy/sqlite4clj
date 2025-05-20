@@ -13,9 +13,13 @@
 (defonce db
   (d/init-db! "database.db"
     {:read-only true
-     :pool-size 4}))
+     :pool-size 4
+     :pragma    {:foreign_keys false}}))
 
 (comment
+  (d/q db ["pragma foreign_keys;"]
+    (fn [row] row))
+  
   (d/q db ["some malformed sqlite"])
 
   ;; This cause hard crash

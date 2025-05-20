@@ -14,7 +14,7 @@ Currently, this project is very much a proof of concept. But, I'm hoping to ulti
 
 [Clojure: SQLite C API with project Panama and Coffi](https://andersmurphy.com/2025/05/20/clojure-sqlite-c-api-with-project-panama-and-coffi.html)
 
-## Building SQLITE from source
+## Building SQLite from source
 
 See this [blog post](https://andersmurphy.com/2023/07/09/sqlite-building-from-source-on-macos.html) .
 
