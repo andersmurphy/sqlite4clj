@@ -19,6 +19,12 @@
 (comment
   (d/q db ["pragma foreign_keys;"]
     (fn [row] row))
+
+  (d/with-read-tx [tx db]
+    (d/q tx ["pragma foreign_keys;"]
+      (fn [row] row))
+    (d/q tx ["pragma foreign_keys;"]
+      (fn [row] row)))
   
   (d/q db ["some malformed sqlite"])
 
@@ -35,7 +41,7 @@
            "foo"
            1])
 
-  (d/q db  ["INSERT INTO session (id, checks) VALUES ('foo', 1)"])
+  (d/q db ["INSERT INTO session (id, checks) VALUES ('foo', 1)"])
 
   (time
     (->> (mapv

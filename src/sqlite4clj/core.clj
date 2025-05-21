@@ -82,15 +82,45 @@
      :close
      (fn [] (run! (fn [conn] (api/close (:pdb conn))) conns))}))
 
-(defn q [{:keys [conn-pool]} query & [row-builder]]
-  (let [conn   (LinkedBlockingQueue/.take conn-pool)        
-        stmt   (prepare-cached conn query)]
+(defn q [{:keys [conn-pool] :as db} query & [row-builder]]
+  (let [conn (if conn-pool
+               (LinkedBlockingQueue/.take conn-pool)
+               ;; If we don't have a connection pool
+               ;; then we have a connection (with-read/write-tx).
+               db)
+        stmt (prepare-cached conn query)]
     (try
       (q* stmt row-builder)
       (finally
-        (LinkedBlockingQueue/.offer conn-pool conn)))))
+        (when conn-pool (LinkedBlockingQueue/.offer conn-pool conn))))))
+
+(defmacro with-read-tx
+  {:clj-kondo/lint-as 'clojure.core/with-open}
+  [[tx db] & body]
+  `(let [conn-pool# (:conn-pool ~db)
+         ~tx        (LinkedBlockingQueue/.take conn-pool#)]
+     (try
+       (q ~tx ["BEGIN DEFERRED;"])
+       ~@body
+       (finally
+         (q ~tx ["COMMIT;"])
+         (LinkedBlockingQueue/.offer conn-pool# ~tx)))))
+
+(defmacro with-write-tx
+  {:clj-kondo/lint-as 'clojure.core/with-open}
+  [[tx db] & body]
+  `(let [conn-pool# (:conn-pool ~db)
+         ~tx        (LinkedBlockingQueue/.take conn-pool#)]
+     (try
+       (q ~tx ["BEGIN IMMEDIATE;"])
+       ~@body
+       (finally
+         (q ~tx ["COMMIT;"])
+         (LinkedBlockingQueue/.offer conn-pool# ~tx)))))
+
 
 ;; TODO: errors
 ;; TODO: response type
 ;; TODO: faster response build
 ;; TODO: finalise prepared statements when shutting down
+
