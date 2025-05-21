@@ -80,17 +80,15 @@
      :close
      (fn [] (run! (fn [conn] (api/close (:pdb conn))) conns))}))
 
-(defn q [{:keys [conn-pool] :as db} query]
-  (let [conn (if conn-pool
-               (LinkedBlockingQueue/.take conn-pool)
-               ;; If we don't have a connection pool
-               ;; then we have a connection (with-read/write-tx).
-               db)
-        stmt (prepare-cached conn query)]
-    (try
-      (q* stmt)
-      (finally
-        (when conn-pool (LinkedBlockingQueue/.offer conn-pool conn))))))
+(defn q [{:keys [conn-pool] :as tx} query]
+  (if conn-pool
+    (let [conn (LinkedBlockingQueue/.take conn-pool)
+          stmt (prepare-cached conn query)]
+      (try
+        (q* stmt)
+        (finally (LinkedBlockingQueue/.offer conn-pool conn))))
+    ;; If we don't have a connection pool then we have a tx.
+    (q* (prepare-cached tx query))))
 
 (defmacro with-read-tx
   {:clj-kondo/lint-as 'clojure.core/with-open}
@@ -115,7 +113,6 @@
        (finally
          (q ~tx ["COMMIT;"])
          (LinkedBlockingQueue/.offer conn-pool# ~tx)))))
-
 
 ;; TODO: errors
 ;; TODO: response type
