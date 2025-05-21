@@ -59,20 +59,20 @@
                  (d/q db ["SELECT chunk_id, state FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)"
                           1978 3955 5932 1979 3956 5933 1980 3957 5934])
                  nil)))
-           (range 0 2000))
+           (range 0 4000))
       (run! (fn [x] @x))))
-
-  (user/bench ;; Execution time mean : 545.401696 µs
+  
+  (user/bench ;; Execution time mean : 455.139383 µs
     (d/q db
       ["SELECT chunk_id, state FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)"
        1978 3955 5932 1979 3956 5933 1980 3957 5934]))
 
-  (user/bench ;; Execution time mean : 545.401696 µs
+  (user/bench
     (->> (d/q db
       ["SELECT chunk_id, state FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)"
        1978 3955 5932 1979 3956 5933 1980 3957 5934])
       (mapv (fn [[chunk-id state]] {:chunk-id chunk-id :state state}))))
 
-  (user/bench ;; Execution time mean : 153.307535 µs
+  (user/bench
     (d/q db
       ["SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)  GROUP BY chunk_id" 1978 3955 5932 1979 3956 5933 1980 3957 5934])))

@@ -15,6 +15,12 @@
     (catch Throwable _
       (ex-info "Architecture not supported" {:arch arch}))))
 
+(defcfn initialize
+  sqlite3_initialize
+  [::mem/pointer] ::mem/int)
+
+(defonce init-lib (initialize nil))
+
 (defn sqlite-ok? [code]
   (= code 0))
 
