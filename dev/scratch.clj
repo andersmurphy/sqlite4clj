@@ -17,23 +17,22 @@
      :pragma    {:foreign_keys false}}))
 
 (comment
-  (d/q db ["pragma foreign_keys;"]
-    (fn [row] row))
+  (d/q db ["pragma foreign_keys;"])
 
   (d/with-read-tx [tx db]
-    (d/q tx ["pragma foreign_keys;"]
-      (fn [row] row))
-    (d/q tx ["pragma foreign_keys;"]
-      (fn [row] row)))
-  
+    (d/q tx ["pragma foreign_keys;"])
+    (d/q tx ["pragma foreign_keys;"]))
+
   (d/q db ["some malformed sqlite"])
 
   ;; This cause hard crash
   (d/q db ["pragma wal;" "pragma wal;"])
 
-  (d/q db ["SELECT chunk_id, state FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-           1978 3955 5932 1979 3956 5933 1980 3957 5934]
-      (fn [[chunk-id state]] {:chunk-id chunk-id :state state}))
+  (time
+    (->> (d/q db ["SELECT chunk_id, state FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                  1978 3955 5932 1979 3956 5933 1980 3957 5934])
+      (mapv
+        (fn [[chunk-id state]] {:chunk-id chunk-id :state state}))))
 
 
   ;; This causes segfault
@@ -48,8 +47,7 @@
            (fn [n]
              (future
                (d/q db
-                 ["SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)  GROUP BY chunk_id" 1978 3955 5932 1979 3956 5933 1980 3957 5934]
-                 (fn [row] row))))
+                 ["SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)  GROUP BY chunk_id" 1978 3955 5932 1979 3956 5933 1980 3957 5934])))
            (range 0 2000))
       (run! (fn [x] @x))))
 
@@ -59,8 +57,7 @@
              (future
                (do
                  (d/q db ["SELECT chunk_id, state FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                          1978 3955 5932 1979 3956 5933 1980 3957 5934]
-                   (fn [row] row))
+                          1978 3955 5932 1979 3956 5933 1980 3957 5934])
                  nil)))
            (range 0 2000))
       (run! (fn [x] @x))))
@@ -68,10 +65,14 @@
   (user/bench ;; Execution time mean : 545.401696 µs
     (d/q db
       ["SELECT chunk_id, state FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-       1978 3955 5932 1979 3956 5933 1980 3957 5934]
-      (fn [[chunk-id state]] {:chunk-id chunk-id :state state})))
+       1978 3955 5932 1979 3956 5933 1980 3957 5934]))
+
+  (user/bench ;; Execution time mean : 545.401696 µs
+    (->> (d/q db
+      ["SELECT chunk_id, state FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+       1978 3955 5932 1979 3956 5933 1980 3957 5934])
+      (mapv (fn [[chunk-id state]] {:chunk-id chunk-id :state state}))))
 
   (user/bench ;; Execution time mean : 153.307535 µs
     (d/q db
-      ["SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)  GROUP BY chunk_id" 1978 3955 5932 1979 3956 5933 1980 3957 5934]
-      (fn [row] row))))
+      ["SELECT chunk_id, JSON_GROUP_ARRAY(state) AS chunk_cells FROM cell WHERE chunk_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)  GROUP BY chunk_id" 1978 3955 5932 1979 3956 5933 1980 3957 5934])))

@@ -27,17 +27,15 @@
     (bind-params stmt params)
     stmt))
 
-(defn- q* [stmt & [row-builder]]
+(defn- q* [stmt]
   (let [cols (range (api/column-count stmt))
         rs   (loop [rows (transient [])]
                (let [step (api/step stmt)]
                  (cond
                    (= step 100)
-                   (when row-builder
-                     (recur (->> (mapv #(api/column-text stmt %)
-                                   cols)
-                              row-builder
-                              (conj! rows))))
+                   (recur (->> (mapv #(api/column-text stmt %)
+                                 cols)
+                            (conj! rows)))
 
                    (= step 101) (persistent! rows)
                    :else        :error)))]
@@ -82,7 +80,7 @@
      :close
      (fn [] (run! (fn [conn] (api/close (:pdb conn))) conns))}))
 
-(defn q [{:keys [conn-pool] :as db} query & [row-builder]]
+(defn q [{:keys [conn-pool] :as db} query]
   (let [conn (if conn-pool
                (LinkedBlockingQueue/.take conn-pool)
                ;; If we don't have a connection pool
@@ -90,7 +88,7 @@
                db)
         stmt (prepare-cached conn query)]
     (try
-      (q* stmt row-builder)
+      (q* stmt)
       (finally
         (when conn-pool (LinkedBlockingQueue/.offer conn-pool conn))))))
 
