@@ -4,7 +4,16 @@
    [coffi.mem :as mem]
    [coffi.ffi :as ffi :refer [defcfn]]))
 
-(ffi/load-library "resources/sqlite3.so")
+;; Load appropriate SQLite library
+(let [arch (System/getProperty "os.arch")]
+  (try
+    (ffi/load-library
+      ({"aarch64" "resources/sqlite3_aarch64.so"
+        "amd64"   "resources/sqlite3_amd64.so"
+        "x86_64"  "resources/sqlite3_amd64.so"}
+       arch))
+    (catch Throwable _
+      (ex-info "Architecture not supported" {:arch arch}))))
 
 (defn sqlite-ok? [code]
   (= code 0))
