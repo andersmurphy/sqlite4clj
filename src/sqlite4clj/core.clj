@@ -27,18 +27,25 @@
     (bind-params stmt params)
     stmt))
 
-(defn- q* [stmt]
-  (let [cols (range (api/column-count stmt))
-        rs   (loop [rows (transient [])]
-               (let [step (api/step stmt)]
-                 (cond
-                   (= step 100)
-                   (recur (->> (mapv #(api/column-text stmt %)
-                                 cols)
-                            (conj! rows)))
+(defmacro n-cols->column-fn [stmt max-cols]
+  ;; This loop unrolling makes queries 25% faster
+  (mapv
+    (fn [n-cols]
+      `(fn [] ~(mapv (fn [n] `(api/column-text ~stmt ~n)) (range n-cols))))
+    (range (inc max-cols))))
 
-                   (= step 101) (persistent! rows)
-                   :else        :error)))]
+(defn column-vals-fn [stmt]
+  (let [n-cols (api/column-count stmt)]
+    (get (n-cols->column-fn stmt 10)
+      n-cols)))
+
+(defn- q* [stmt]
+  (let [c-fn (column-vals-fn stmt)
+        rs   (loop [rows (transient [])]
+               (case (int (api/step stmt))
+                 100 (recur (conj! rows (c-fn)))
+                 101 (persistent! rows)
+                 :error))]
     (api/reset stmt)
     (api/clear-bindings stmt)
     rs))

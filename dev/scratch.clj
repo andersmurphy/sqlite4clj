@@ -51,7 +51,7 @@
            (range 0 2000))
       (run! (fn [x] @x))))
 
-  (time
+  (user/bench
     (->> (mapv
            (fn [n]
              (future

@@ -3,5 +3,9 @@
            org.suskalo/coffi      {:mvn/version "1.0.615"}
            org.clojure/core.cache {:mvn/version "1.1.234"}}
  :aliases {:dev {:extra-paths ["dev"]
-                 :jvm-opts ["--enable-native-access=ALL-UNNAMED"]}}}
+                 :jvm-opts
+                 ["--enable-native-access=ALL-UNNAMED"
+                  "-Duser.timezone=UTC"
+                  "-XX:+UseZGC"
+                  "-XX:+ZGenerational"]}}}
 
