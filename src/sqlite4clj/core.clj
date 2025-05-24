@@ -6,7 +6,7 @@
    [clojure.string :as str]
    [clojure.core.cache.wrapped :as cache])
   (:import
-   (java.util.concurrent LinkedBlockingQueue)))
+   (java.util.concurrent BlockingQueue LinkedBlockingQueue)))
 
 (defn type->sqlite3-bind [param]
   (cond
@@ -82,18 +82,18 @@
   (let [conns (repeatedly pool-size
                 (fn [] (new-conn! db-name pragma read-only)))
         pool  (LinkedBlockingQueue/new ^int pool-size)]
-    (run! #(LinkedBlockingQueue/.add pool %) conns)
+    (run! #(BlockingQueue/.add pool %) conns)
     {:conn-pool pool
      :close
      (fn [] (run! (fn [conn] (api/close (:pdb conn))) conns))}))
 
 (defn q [{:keys [conn-pool] :as tx} query]
   (if conn-pool
-    (let [conn (LinkedBlockingQueue/.take conn-pool)
+    (let [conn (BlockingQueue/.take conn-pool)
           stmt (prepare-cached conn query)]
       (try
         (q* stmt)
-        (finally (LinkedBlockingQueue/.offer conn-pool conn))))
+        (finally (BlockingQueue/.offer conn-pool conn))))
     ;; If we don't have a connection pool then we have a tx.
     (q* (prepare-cached tx query))))
 
@@ -101,25 +101,25 @@
   {:clj-kondo/lint-as 'clojure.core/with-open}
   [[tx db] & body]
   `(let [conn-pool# (:conn-pool ~db)
-         ~tx        (LinkedBlockingQueue/.take conn-pool#)]
+         ~tx        (BlockingQueue/.take conn-pool#)]
      (try
        (q ~tx ["BEGIN DEFERRED;"])
        ~@body
        (finally
          (q ~tx ["COMMIT;"])
-         (LinkedBlockingQueue/.offer conn-pool# ~tx)))))
+         (BlockingQueue/.offer conn-pool# ~tx)))))
 
 (defmacro with-write-tx
   {:clj-kondo/lint-as 'clojure.core/with-open}
   [[tx db] & body]
   `(let [conn-pool# (:conn-pool ~db)
-         ~tx        (LinkedBlockingQueue/.take conn-pool#)]
+         ~tx        (BlockingQueue/.take conn-pool#)]
      (try
        (q ~tx ["BEGIN IMMEDIATE;"])
        ~@body
        (finally
          (q ~tx ["COMMIT;"])
-         (LinkedBlockingQueue/.offer conn-pool# ~tx)))))
+         (BlockingQueue/.offer conn-pool# ~tx)))))
 
 ;; TODO: errors
 ;; TODO: response type
