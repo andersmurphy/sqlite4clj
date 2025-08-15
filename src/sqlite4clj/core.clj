@@ -3,6 +3,7 @@
   and prepared statement caching."
   (:require
    [sqlite4clj.api :as api]
+   [sqlite4clj.functions :as funcs]
    [clojure.core.cache.wrapped :as cache])
   (:import
    (java.util.concurrent BlockingQueue LinkedBlockingQueue)))
@@ -30,7 +31,8 @@
     1 `api/column-int
     2 `api/column-double
     3 `api/column-text
-    4 `api/column-blob))
+    4 `api/column-blob
+    5 `(fn [_# _#] nil)))
 
 (defn get-column-types [stmt]
   (let [n-cols (int
@@ -146,6 +148,7 @@
         pool  (LinkedBlockingQueue/new ^int pool-size)]
     (run! #(BlockingQueue/.add pool %) conns)
     {:conn-pool pool
+     :connections conns
      :close
      (fn [] (run! (fn [conn] (api/close (:pdb conn))) conns))}))
 
@@ -165,7 +168,8 @@
            :pool-size pool-size
            :pragma    pragma})]
     {:writer writer
-     :reader reader}))
+     :reader reader
+     :internal {:app-functions (atom {})}}))
 
 (defn q
   "Run a query against a db. Return nil when no results."
@@ -221,3 +225,36 @@
 
 ;; TODO: finalise prepared statements when shutting down
 
+(defn create-function
+  "register a user-defined function with sqlite on all connections.
+
+   parameters:
+   - db: database from init-db!
+   - name: string function name
+   - f-or-var: either a function or a var that points to a function.
+   - opts: a map of options that can include:
+
+     the sqlite function flags (see https://www.sqlite.org/c3ref/c_deterministic.html)
+     - :deterministic? (boolean)
+     - :direct-only? (boolean)
+     - :innocuous? (boolean)
+     - :sub-type? (boolean)
+     - :result-sub-type? (boolean)
+     - :self-order1? (boolean)
+
+     other options:
+     - :arity (int): the number of arguments the function takes.
+
+  by default the function/var will be analyzed and the arity will be inferred.
+  if the function has multiple arities then all will be registered with sqlite.
+  you can specify the arity explicitly with the `:arity` option."
+  [db name f-or-var & {:as opts}]
+  (funcs/create-function db name f-or-var opts))
+
+(defn remove-function
+  "unregister a user-defined function from sqlite on all connections.
+  if an arity is not provided, it will unregister all arities for the function."
+  ([db name]
+   (funcs/remove-function db name))
+  ([db name arity]
+   (funcs/remove-function db name arity)))

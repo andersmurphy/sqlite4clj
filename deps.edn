@@ -8,10 +8,11 @@
            com.github.igrishaev/deed-core {:mvn/version "0.1.0"}
            ;; Data compression
            io.airlift/aircompressor-v3    {:mvn/version "3.3"}}
- :aliases {:dev {:extra-paths ["dev"]
+ :aliases {:dev {:extra-paths ["dev" "test"]
                  :jvm-opts
                  ["--enable-native-access=ALL-UNNAMED"
                   "-Duser.timezone=UTC"
                   "-XX:+UseZGC"
-                  "-XX:+ZGenerational"]}}}
-
+                  "-XX:+ZGenerational"]}
+           :kaocha {:extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}}
+                    :main-opts ["-m" "kaocha.runner"]}}}

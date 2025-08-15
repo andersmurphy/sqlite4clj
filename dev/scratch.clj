@@ -165,3 +165,13 @@
   (d/q reader ["SELECT id, data FROM blobby WHERE id = ?" "blob-test5"])
 
   )
+
+
+
+(comment
+  (defn double [v] (* 2 v))
+  (d/create-function db "double" double {:deterministic? true})
+  (d/q reader ["SELECT double(5)"])
+  (d/q writer ["SELECT double(5)"])
+  ;;
+  )

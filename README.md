@@ -169,3 +169,8 @@ gcc -shared -Os -I. -fPIC -DSQLITE_DQS=0 \
    -DSQLITE_ENABLE_STAT4 \
    sqlite3.c -lpthread -ldl -lm -o sqlite3.so
 ```
+
+
+## Development & Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md)

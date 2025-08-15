@@ -1,0 +1,12 @@
+{:min-bb-version "0.8.156"
+ :tasks          {:requires         ([clojure.string :as str])
+                  test              {:doc "Runs the test suite, extra args are passed to kaocha"
+                                     :task (apply clojure "-M:dev:kaocha" *command-line-args*)}
+                  lint.copy-configs {:doc "Import clj-kondo configs from dependencies"
+                                     :task (let [cp (-> (shell {:out :string} "clojure -Spath -M:test:dev") :out str/trim)]
+                                             (shell (str "clj-kondo --lint " cp " --dependencies --copy-configs --skip-lint")))}
+                  lint              {:doc "Run the clj-kondo linter"
+                                     :task (shell (str "clj-kondo" " --fail-level error"
+                                                       (if (seq *command-line-args*)
+                                                         (str " --lint " (first *command-line-args*))
+                                                         " --lint src test")))}}}

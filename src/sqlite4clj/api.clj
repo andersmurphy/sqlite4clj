@@ -2,7 +2,7 @@
   "These function map directly to SQLite's C API."
   (:require
    [clojure.java.io :as io]
-   [coffi.ffi :as ffi :refer [defcfn]]   
+   [coffi.ffi :as ffi :refer [defcfn]]
    [deed.core :as deed]
    [coffi.mem :as mem])
   (:import
@@ -11,7 +11,15 @@
    [io.airlift.compress.v3.zstd ZstdCompressor ZstdDecompressor
     ZstdNativeCompressor ZstdNativeDecompressor]))
 
-(def RAW_BLOB          (byte 0))
+(def SQLITE_UTF8 1)
+(def SQLITE_DETERMINISTIC 0x000000800)
+(def SQLITE_DIRECTONLY 0x000080000)
+(def SQLITE_INNOCUOUS 0x000200000)
+(def SQLITE_SUBTYPE 0x000100000)
+(def SQLITE_RESULT_SUBTYPE 0x001000000)
+(def SQLITE_SELFORDER1 0x002000000)
+
+(def RAW_BLOB (byte 0))
 (def ZSTD_ENCODED_BLOB (byte 1))
 
 (defn add-leading-byte [blob leading-byte]
@@ -60,14 +68,12 @@
                             "x86_64"  "sqlite3_amd64.so"}
                            arch)
         temp-lib-filename (str "sqlite4clj_temp_" res-file)]
-    (println "loading bundled SQLite library")
     (copy-resource res-file temp-lib-filename)
     (ffi/load-library temp-lib-filename)
     ;; We delete once loaded
     (Files/deleteIfExists (.toPath (io/file temp-lib-filename)))))
 
 (defn load-system-library []
-  (println "loading system SQLite library")
   (ffi/load-system-library "sqlite3"))
 
 ;; Load appropriate SQLite library
@@ -234,3 +240,108 @@
 (defcfn finalize
   sqlite3_finalize
   [::mem/pointer] ::mem/int)
+
+(defcfn create-function-v2
+  sqlite3_create_function_v2
+  [::mem/pointer  ;; db
+   ::mem/c-string ;; zFunctionName
+   ::mem/int      ;; nArg
+   ::mem/int      ;; eTextRep (includes flags)
+   ::mem/pointer  ;; pApp (user data)
+   ::mem/pointer  ;; xFunc (function pointer, not inline definition)
+   ::mem/pointer  ;; xStep (for aggregates)
+   ::mem/pointer  ;; xFinal (for aggregates)
+   ::mem/pointer] ;; xDestroy (destructor)
+  ::mem/int)
+
+(defcfn value-text
+  sqlite3_value_text
+  [::mem/pointer] ::mem/c-string)
+
+(defcfn value-int
+  sqlite3_value_int
+  [::mem/pointer] ::mem/int)
+
+(defcfn value-double
+  sqlite3_value_double
+  [::mem/pointer] ::mem/double)
+
+(defcfn value-type
+  sqlite3_value_type
+  [::mem/pointer] ::mem/int)
+
+(defcfn value-bytes
+  sqlite3_value_bytes
+  [::mem/pointer] ::mem/int)
+
+
+(defcfn value-blob
+  "sqlite3_value_blob"
+  [::mem/pointer] ::mem/pointer
+  sqlite3-value-blob-native
+  [sqlite-value]
+  (let [result (sqlite3-value-blob-native sqlite-value)]
+    (if (mem/null? result)
+      nil
+      (let [size (value-bytes sqlite-value)
+            blob (mem/deserialize
+                  (mem/reinterpret result size)
+                  [::mem/array ::mem/byte size :raw? true])]
+        (if (and (pos? size) (= (first blob) ZSTD_ENCODED_BLOB))
+          (decode blob)
+          (if (pos? size)
+            (remove-leading-byte blob)
+            (byte-array 0)))))))
+
+(defcfn result-text
+  "sqlite3_result_text"
+  [::mem/pointer ::mem/c-string ::mem/int ::mem/pointer] ::mem/void
+  sqlite3-result-text-native
+  [context text]
+  (let [text-bytes (String/.getBytes (str text) "UTF-8")]
+    (sqlite3-result-text-native context
+                                (String/new text-bytes "UTF-8")
+                                (count text-bytes)
+                                sqlite-transient)))
+
+(defcfn result-int
+  sqlite3_result_int
+  [::mem/pointer ::mem/int] ::mem/void)
+
+(defcfn result-double
+  sqlite3_result_double
+  [::mem/pointer ::mem/double] ::mem/void)
+
+(defcfn result-null
+  "sqlite3_result_null"
+  [::mem/pointer] ::mem/void
+  sqlite3-result-null-native
+  ([context]
+   (sqlite3-result-null-native context))
+  ([context _]
+   (sqlite3-result-null-native context)))
+
+(defcfn result-blob
+  "sqlite3_result_blob"
+  [::mem/pointer ::mem/pointer ::mem/int ::mem/pointer] ::mem/void
+  sqlite3-result-blob-native
+  [context blob]
+  (let [blob (if (bytes? blob)
+               (add-leading-byte blob RAW_BLOB)
+               (encode blob 3))
+        blob-l (count blob)]
+    (sqlite3-result-blob-native context
+                                (mem/serialize blob [::mem/array ::mem/byte blob-l])
+                                blob-l
+                                sqlite-transient)))
+
+(defcfn result-error
+  "sqlite3_result_error"
+  [::mem/pointer ::mem/c-string ::mem/int] ::mem/void
+  sqlite3-result-error-native
+  [context msg]
+  (let [msg (str msg)
+        msg-bytes (String/.getBytes msg "UTF-8")]
+    (sqlite3-result-error-native context
+                                 (String/new msg-bytes "UTF-8")
+                                 (count msg-bytes))))
