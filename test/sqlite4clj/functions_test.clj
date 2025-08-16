@@ -149,7 +149,7 @@
   (testing "All return types are supported correctly"
     (with-db [db (test-db)]
       ;; Return NULL
-      (d/create-function db "return_null" (fn []  nil))
+      (d/create-function db "return_null" (fn [] nil))
       (is (= [nil] (d/q (:writer db) ["SELECT return_null()"])))
 
       ;; Return INTEGER
@@ -206,11 +206,11 @@
                          {:innocuous? true})
       (is (some? (funcs/get-function db "temp_fn" 0)))
       (is (some? (funcs/get-function db "temp_fn" 1)))
-      (is (= [42]   (d/q (:writer db) ["SELECT temp_fn()"])))
+      (is (= [42] (d/q (:writer db) ["SELECT temp_fn()"])))
       (is (= [:woo] (d/q (:writer db) ["SELECT temp_fn(0)"])))
 
       (d/remove-function db "temp_fn" 0)
-      (is (nil?  (funcs/get-function db "temp_fn" 0)))
+      (is (nil? (funcs/get-function db "temp_fn" 0)))
       (is (some? (funcs/get-function db "temp_fn" 1)))
       (is (= [:woo] (d/q (:writer db) ["SELECT temp_fn(0)"])))
       (is (thrown-with-msg? Exception #"wrong number of arguments to function temp_fn()"
@@ -234,3 +234,23 @@
                             (d/q (:writer db) ["SELECT temp_fn()"])))
       (is (thrown-with-msg? Exception #"no such function: temp_fn"
                             (d/q (:writer db) ["SELECT temp_fn(0)"]))))))
+
+(deftest registering-function-vars
+  (testing "Can register a var, redef it twice, and remove the function"
+    #_{:clj-kondo/ignore [:inline-def]}
+    (defn my-double [v] (* 2 v))
+    (with-db [db (test-db)]
+      (d/create-function db "double" #'my-double {:deterministic? true})
+      (is (= [10] (d/q (:writer db) ["SELECT double(5)"])))
+      (alter-var-root #'my-double (fn [_]
+                                    (fn [v] (* 3 v))))
+
+      (is (= [15] (d/q (:writer db) ["SELECT double(5)"])))
+
+      ;; this one will fail if the watch was removed!
+      (alter-var-root #'my-double (fn [_] (fn [v] (* 4 v))))
+      (is (= [20] (d/q (:writer db) ["SELECT double(5)"])))
+
+      (d/remove-function db "double")
+      (is (thrown-with-msg? Exception #"no such function: double"
+                            (d/q (:writer db) ["SELECT double(5)"]))))))
