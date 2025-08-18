@@ -2,6 +2,7 @@
   "These function map directly to SQLite's C API."
   (:require
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [coffi.ffi :as ffi :refer [defcfn]]
    [deed.core :as deed]
    [coffi.mem :as mem])
@@ -61,12 +62,23 @@
               out (io/output-stream (io/file output-path))]
     (io/copy in out)))
 
+(defn get-arch+os []
+  (let [os-name (str/lower-case (System/getProperty "os.name"))]
+    (str (System/getProperty "os.arch") "-"
+      (cond (str/includes? os-name "win") "windows"
+            (str/includes? os-name "nux") "linux"
+            (str/includes? os-name "mac") "macos"))))
+
 (defn load-bundled-library []
-  (let [arch              (System/getProperty "os.arch")
-        res-file          ({"aarch64" "sqlite3_aarch64.so"
-                            "amd64"   "sqlite3_amd64.so"
-                            "x86_64"  "sqlite3_amd64.so"}
-                           arch)
+  (let [res-file          (case (get-arch+os)
+                            "aarch64-linux"   "sqlite3_aarch64-linux-gnu.so"
+                            "aarch64-macos"   "sqlite3_aarch64-macos-none.so"
+                            ("x86-linux"
+                             "amd64-linux")   "sqlite3_x86_64-linux-gnu.so"
+                            ("x86-macos"
+                             "amd64-macos")   "sqlite3_x86_64-macos-none.so"
+                            ("x86-windows"
+                             "amd64-windows") "sqlite3_x86_64-windows-gnu.dll")
         temp-lib-filename (str "sqlite4clj_temp_" res-file)]
     (copy-resource res-file temp-lib-filename)
     (ffi/load-library temp-lib-filename)

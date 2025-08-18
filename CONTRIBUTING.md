@@ -40,3 +40,15 @@ See [kaocha docs][kaocha] for more tips.
 [bb]: https://babashka.org/
 [kaocha]: https://cljdoc.org/d/lambdaisland/kaocha/
 [kondo]: https://github.com/clj-kondo/clj-kondo
+
+## Building sqlite binaries
+
+Install `zig`. Ensure the sqlite amalgamation files you want to build are in `sqlite-amalgamation` then run:
+
+```
+bash cross-compile.sh
+```
+
+New binaries will be under `resources`.
+
+The latest SQLite amalgamations can be found [here](https://sqlite.org/download.html).
