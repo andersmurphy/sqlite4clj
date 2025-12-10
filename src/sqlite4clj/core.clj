@@ -80,26 +80,24 @@
           (conj! cols (get-column-val stmt n)))))))
 
 (defn- q* [conn query]
-  (let [result
-        (let [{:keys [stmt]} (prepare-cached conn query)]
-          (with-stmt-reset [stmt stmt]
-            (let [n-cols (int
-                           #_{:clj-kondo/ignore [:type-mismatch]}
-                           (api/column-count stmt))]
-              (loop [rows (transient [])]
-                (let [code (int
-                             #_{:clj-kondo/ignore [:type-mismatch]}
-                             (api/step stmt))]
-                  (case code
-                    100 (recur (conj! rows (column stmt n-cols)))
-                    101 (persistent! rows)
-                    code))))))]
-    (cond
-      (vector? result) (when (seq result) result)
-      (= result 101)   nil
-      :else            (throw (api/sqlite-ex-info (:pdb conn) result
-                                {:sql    (first query)
-                                 :params (subvec query 1)})))))
+  (let [{:keys [stmt]} (prepare-cached conn query)]
+    (with-stmt-reset [stmt stmt]
+      (let [n-cols (int
+                    #_{:clj-kondo/ignore [:type-mismatch]}
+                    (api/column-count stmt))]
+        (reify clojure.lang.IReduceInit
+          (reduce [_ f init]
+            (loop [ret init]
+              (let [code (int
+                          #_{:clj-kondo/ignore [:type-mismatch]}
+                          (api/step stmt))]
+                (case code
+                  100 (let [ret (f ret (column stmt n-cols))]
+                        (if (reduced? ret)
+                          @ret
+                          (recur ret)))
+                  101 ret
+                  code)))))))))
 
 (def default-pragma
   {:cache_size         15625
@@ -183,16 +181,17 @@
 
 (defn q
   "Run a query against a db. Return nil when no results."
-  [{:keys [conn-pool] :as tx} query]
+  [{:keys [conn-pool result-set-fn] :as tx
+    :or {result-set-fn #(into [] %)}} query]
   (if conn-pool
-    (binding [*print-length*    nil]
+    (binding [*print-length* nil]
       (let [conn (BlockingQueue/.take conn-pool)]
         (try
-          (q* conn query)
+          (result-set-fn (q* conn query))
           ;; Always return the conn even on error
           (finally (BlockingQueue/.offer conn-pool conn)))))
     ;; If we don't have a connection pool then we have a tx.
-    (q* tx query)))
+    (result-set-fn (q* tx query))))
 
 (defn optimize-db
   "Use for running optimise on long lived connections. For query_only
