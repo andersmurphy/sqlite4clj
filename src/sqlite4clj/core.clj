@@ -88,16 +88,18 @@
         (reify clojure.lang.IReduceInit
           (reduce [_ f init]
             (loop [ret init]
-              (let [code (int
-                          #_{:clj-kondo/ignore [:type-mismatch]}
-                          (api/step stmt))]
-                (case code
-                  100 (let [ret (f ret (column stmt n-cols))]
-                        (if (reduced? ret)
-                          @ret
-                          (recur ret)))
-                  101 ret
-                  code)))))))))
+              (case (int
+                     #_{:clj-kondo/ignore [:type-mismatch]}
+                     (api/step stmt))
+                100 (let [ret (f ret (column stmt n-cols))]
+                      (if (reduced? ret)
+                        @ret
+                        (recur ret)))
+                101 ret
+                (throw (api/sqlite-ex-info (:pdb conn)
+                                           ret
+                                           {:sql (first query)
+                                            :params (subvec query 1)}))))))))))
 
 (def default-pragma
   {:cache_size         15625
