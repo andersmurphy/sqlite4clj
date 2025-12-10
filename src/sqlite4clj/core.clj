@@ -179,10 +179,14 @@
      ;; garbage collected.
      :internal {:app-functions (atom {})}}))
 
+(defn default-result-set-fn
+  [result-set]
+  (into [] result-set))
+
 (defn q
   "Run a query against a db. Return nil when no results."
   [{:keys [conn-pool result-set-fn] :as tx
-    :or {result-set-fn #(into [] %)}} query]
+    :or {result-set-fn default-result-set-fn}} query]
   (if conn-pool
     (binding [*print-length* nil]
       (let [conn (BlockingQueue/.take conn-pool)]
