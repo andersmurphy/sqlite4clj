@@ -15,6 +15,7 @@
         (integer? param) (api/bind-int    stmt i param)
         (double? param)  (api/bind-double stmt i param)
         (string? param)  (api/bind-text   stmt i param)
+        (nil? param)     (api/bind-null   stmt i)
         :else            (api/bind-blob   stmt i param))
       (inc i))
     1 ;; starts at 1

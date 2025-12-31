@@ -137,6 +137,10 @@
   sqlite3_bind_double
   [::mem/pointer ::mem/int ::mem/double] ::mem/int)
 
+(defcfn bind-null
+  sqlite3_bind_null
+  [::mem/pointer ::mem/int] ::mem/int)
+
 (def sqlite-static (mem/as-segment 0))
 (def sqlite-transient (mem/as-segment -1))
 
