@@ -228,13 +228,14 @@
            :vfs       vfs
            :default-result-set-fn default-result-set-fn})
         ;; Pool of read connections
-        reader
-        (init-pool! url
-          {:read-only true
-           :pool-size pool-size
-           :pragma    pragma
-           :vfs       vfs
-           :default-result-set-fn default-result-set-fn})]
+        reader (if (= ":memory:" url)
+                 writer
+                 (init-pool! url
+                             {:read-only true
+                              :pool-size pool-size
+                              :pragma    pragma
+                              :vfs       vfs
+                              :default-result-set-fn default-result-set-fn}))]
     {:writer   writer
      :reader   reader
      ;; Prevents application function callback pointers from getting
