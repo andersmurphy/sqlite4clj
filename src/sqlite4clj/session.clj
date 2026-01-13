@@ -2,10 +2,12 @@
   (:require
    [coffi.ffi :as ffi :refer [defcfn]]
    [coffi.mem :as mem]
-   [sqlite4clj.impl.api :as api]))
+   [sqlite4clj.impl.api :as api]
+   [sqlite4clj.core :as d]))
 
-;; ========= SESSION extension =========
-;; https://sqlite.org/session/changegroup.html
+;; -----------------------------
+;; SESSION extension
+;; https://sqlite.org/sessionintro.html
 
 (defcfn session-create
   "sqlite3session_create"
@@ -73,10 +75,11 @@
 (defn new-session
   "Creates a session and attaches it to the database."
   [conn]
-  (let [pdb      (:pdb conn)
-        pSession (session-create pdb)]
-    (session-attach pSession nil)
-    (atom pSession)))
+  (d/with-conn [conn conn]
+    (let [pdb      (:pdb conn)
+          pSession (session-create pdb)]
+      (session-attach pSession nil)
+      (atom pSession))))
 
 (defn cancel-session
   "Cancels session without undoing changes."
@@ -87,28 +90,28 @@
 (defn undo-session
   "Undoes the current session and deletes it."
   [conn session]
-  (when-let [pSession @session]
-    (let [pdb                     (:pdb conn)
-          [nSet pSet]             (session-changeset pdb pSession)
-          _                       (session-delete pSession)
-          [nInvertSet pInvertSet] (changeset-invert pdb nSet pSet)]
-      (with-open [arena (mem/confined-arena)]
-        (let [x-conflict
-              ;; Fails if there's a conflict (there should never be a conflict)
-              ;; when using undo-session correctly.
-              (mem/serialize (fn [_ _ _] (int 0))
-                [::ffi/fn
-                 [::mem/pointer ::mem/int ::mem/pointer]
-                 ::mem/int
-                 :raw-fn? true]
-                arena)]
-          (changeset-apply pdb nInvertSet pInvertSet nil x-conflict nil)))
-      (api/free pSet)
-      (api/free pInvertSet)
-      (reset! session nil))))
+  (d/with-conn [conn conn]
+    (when-let [pSession @session]
+      (let [pdb                     (:pdb conn)
+            [nSet pSet]             (session-changeset pdb pSession)
+            _                       (session-delete pSession)
+            [nInvertSet pInvertSet] (changeset-invert pdb nSet pSet)]
+        (with-open [arena (mem/confined-arena)]
+          (let [x-conflict
+                ;; Fails if there's a conflict (there should never be a conflict)
+                ;; when using undo-session correctly.
+                (mem/serialize (fn [_ _ _] (int 0))
+                  [::ffi/fn
+                   [::mem/pointer ::mem/int ::mem/pointer]
+                   ::mem/int
+                   :raw-fn? true]
+                  arena)]
+            (changeset-apply pdb nInvertSet pInvertSet nil x-conflict nil)))
+        (api/free pSet)
+        (api/free pInvertSet)
+        (reset! session nil)))))
 
 (comment
-  (require '[sqlite4clj.core :as d])
 
   (defonce db
     (d/init-db! "database.db"
@@ -131,4 +134,13 @@
     (println (d/q (:reader db) ["select count(*) from bar"]))
     (d/with-conn [conn (:writer db)]
       (undo-session conn session))
-    (println (d/q (:reader db) ["select count(*) from bar"]))))
+    (println (d/q (:reader db) ["select count(*) from bar"])))
+
+  
+  (let [old-sesion (new-session (:writer db))]
+    (d/with-write-tx [conn (:writer db)]
+      (undo-session conn old-sesion)
+      (new-session conn)))
+
+  (+ 3 4)
+  )
