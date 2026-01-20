@@ -30,15 +30,19 @@
             (str/includes? os-name "mac") "macos"))))
 
 (defn load-bundled-library []
-  (let [res-file          (case (get-arch+os)
-                            "aarch64-linux"   "sqlite3_aarch64-linux-gnu.so"
-                            "aarch64-macos"   "sqlite3_aarch64-macos-none.so"
-                            ("x86-linux"
-                             "amd64-linux")   "sqlite3_x86_64-linux-gnu.so"
-                            ("x86-macos"
-                             "amd64-macos")   "sqlite3_x86_64-macos-none.so"
-                            ("x86-windows"
-                             "amd64-windows") "sqlite3_x86_64-windows-gnu.dll")
+  (let [res-file
+        (case (get-arch+os)
+          "aarch64-linux"   "sqlite3_aarch64-linux-gnu.so"
+          "aarch64-macos"   "sqlite3_aarch64-macos-none.so"
+          ("x86-linux"
+           "x86_64-linux"
+           "amd64-linux")   "sqlite3_x86_64-linux-gnu.so"
+          ("x86-macos"
+           "x86_64-macos"
+           "amd64-macos")   "sqlite3_x86_64-macos-none.so"
+          ("x86-windows"
+           "x86_64-windows"
+           "amd64-windows") "sqlite3_x86_64-windows-gnu.dll")
         temp-lib-filename (str "sqlite4clj_temp_" res-file)]
     (copy-resource res-file temp-lib-filename)
     (ffi/load-library temp-lib-filename)
