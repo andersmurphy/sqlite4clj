@@ -68,6 +68,10 @@
 
 (defonce init-lib (initialize nil))
 
+(defcfn free
+  sqlite3_free
+  [::mem/pointer] ::mem/void)
+
 (defcfn errmsg
   sqlite3_errmsg
   [::mem/pointer] ::mem/c-string)

@@ -242,19 +242,28 @@
      ;; garbage collected.
      :internal {:app-functions (atom {})}}))
 
+(defmacro with-conn
+  "Use the same connection for a series of queries (not a transaction) without
+  returning it to the pool until the end. If passed a connection instead of db
+  binds body with that connection."
+  {:clj-kondo/lint-as 'clojure.core/with-open}
+  [[tx db] & body]
+  `(if-let  [conn-pool# (:conn-pool ~db)]
+     (let [~tx (BlockingQueue/.take conn-pool#)]
+       (binding [*print-length* nil]
+         (try
+           ~@body
+           (finally
+             (BlockingQueue/.offer conn-pool# ~tx)))))
+     (let [~tx ~db]
+       (do ~@body))))
+
 (defn q
   "Run a query against a db. Return nil when no results."
-  [{:keys [conn-pool] :as tx} query &
+  [tx query &
    [{:keys [result-set-fn]}] ]
-  (if conn-pool
-    (binding [*print-length* nil]
-      (let [conn (BlockingQueue/.take conn-pool)]
-        (try
-          (q* conn query result-set-fn)
-          ;; Always return the conn even on error
-          (finally (BlockingQueue/.offer conn-pool conn)))))
-    ;; If we don't have a connection pool then we have a tx.
-    (q* tx query result-set-fn)))
+  (with-conn [conn tx]
+    (q* conn query result-set-fn)))
 
 (defn optimize-db
   "Use for running optimise on long lived connections. For query_only
@@ -302,19 +311,6 @@
            ;; Handles non SQLITE errors crashing a transaction
            (q ~tx ["ROLLBACK"])
            (throw t#))
-         (finally
-           (BlockingQueue/.offer conn-pool# ~tx))))))
-
-(defmacro with-conn
-  "Use the same connection for a series of queries (not a transaction) without
-  returning it to the pool until the end."
-  {:clj-kondo/lint-as 'clojure.core/with-open}
-  [[tx db] & body]
-  `(let [conn-pool# (:conn-pool ~db)
-         ~tx        (BlockingQueue/.take conn-pool#)]
-     (binding [*print-length* nil]
-       (try
-         ~@body
          (finally
            (BlockingQueue/.offer conn-pool# ~tx))))))
 
