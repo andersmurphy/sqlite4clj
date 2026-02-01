@@ -167,13 +167,38 @@ You can also set the `result-set-fn` for all connections on a database with `def
      :default-result-set-fn d/qualified-keyword-result-set-fn}))
 ```
 
+## ⚠️ A note on prepared statements
+
+Part of why sqlite4clj is fast is because caches prepared statements. This is recommended practice for getting the most performance out of SQLite. However, it does lead to two important considerations.
+
+1. You can only execute a statement at a time. The statement bellow will only execute `SELECT 1;` not `SELECT 2;`
+
+```clojure 
+(d/q (:reader db) ["SELECT 1; SELECT 2"])
+```
+
+This is because each statement needs to be compiled and cached separately.
+
+2. Be careful when using `IN`, the statements below will each have their own separate entry in the prepared statement cache:
+
+```clojure
+(d/q (:reader db) ["SELECT * FROM foo WHERE a IN (?, ?, ?);" 1 2 3])
+(d/q (:reader db) ["SELECT * FROM foo WHERE a IN (?, ?);" 1 2])
+```
+
+Consider using `json_each` with `IN` instead, the statements below will be a single entry in the prepared statement cache:
+
+```clojure
+(d/q (:reader db) ["SELECT * FROM foo WHERE a IN SELECT value FROM json_each(?)" (edn->json [1 2 3])])
+(d/q (:reader db) ["SELECT * FROM foo WHERE a IN SELECT value FROM json_each(?)" (edn->json [1 2])])
+```
+
+I might consider adding a `edn_each` function in future.
+
+
 ## Connection pools not thread pools
 
 The connection pools are not thread pools, they use a `LinkedBlockingQueue` to limit/queue access. Unlike thread pool this allows for having as many databases as you want without taking up large amount of memory particularly if you run your queries from virtual threads. With SQLite it's common to have many databases for isolation and convenience. It's not uncommon to have a database per tenant or user, or even simply as a persistent cache. So making this cheap is important as it's one of SQLite's super powers.
-
-## Why is this fast?
-
-The two main speedups are from caching query statements at a connection level and using inline caching of column reading functions.
 
 ## Automatic EDN encoding/decoding
 
