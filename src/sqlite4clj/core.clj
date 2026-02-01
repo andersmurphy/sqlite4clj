@@ -287,8 +287,10 @@
      (binding [*print-length* nil]
        (try
          (q ~tx ["BEGIN DEFERRED"])
-         ~@body
-         (q ~tx ["COMMIT"])
+         ~@(butlast body)
+         (let [r# ~(last body)]
+           (q ~tx ["COMMIT"]) 
+           r#)
          (catch Throwable t#
            ;; Handles non SQLITE errors crashing a transaction
            (q ~tx ["ROLLBACK"])
@@ -305,8 +307,10 @@
      (binding [*print-length* nil]
        (try
          (q ~tx ["BEGIN IMMEDIATE"])
-         ~@body
-         (q ~tx ["COMMIT"])
+         ~@(butlast body)
+         (let [r# ~(last body)]
+           (q ~tx ["COMMIT"])
+           r#)
          (catch Throwable t#
            ;; Handles non SQLITE errors crashing a transaction
            (q ~tx ["ROLLBACK"])
