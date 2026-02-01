@@ -156,12 +156,9 @@
    ;; :optimize     0x10002
    })
 
-(defn pragma->set-pragma-query [pragma read-only]
+(defn pragma->set-pragma-query [pragma]
   (conj (->> (merge default-pragma pragma)
-          (mapv (fn [[k v]] [(str "pragma " (name k) "=" v)])))
-    ;; Needs to be added at the end after all pragma are run
-    ;; as optimise require connection not to be read only
-    [(str "pragma query_only=" (boolean read-only))]))
+          (mapv (fn [[k v]] [(str "pragma " (name k) "=" v)])))))
 
 (defn no-unwrap-result-set-fn
   [_col-metadata result-set]
@@ -179,14 +176,17 @@
     (when (seq result) result)))
 
 (defn new-conn! [db-name pragma read-only vfs default-result-set-fn]
-  (let [;; SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
-        flags           (bit-or 0x00000002 0x00000004)
+  (let [flags           (if read-only
+                          ;; SQLITE_OPEN_READONLY
+                          0x00000001
+                          ;; SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
+                          (bit-or 0x00000002 0x00000004))
         *pdb            (api/open-v2 db-name flags vfs)
         statement-cache (cache/fifo-cache-factory {} :threshold 512)
         conn            {:pdb                   *pdb
                          :stmt-cache            statement-cache
                          :default-result-set-fn default-result-set-fn}]
-    (->> (pragma->set-pragma-query pragma read-only)
+    (->> (pragma->set-pragma-query pragma)
       (run! #(q* conn % default-result-set-fn)))
     conn))
 
