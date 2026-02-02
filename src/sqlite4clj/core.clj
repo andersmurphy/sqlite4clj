@@ -266,16 +266,15 @@
     (q* conn query result-set-fn)))
 
 (defn optimize-db
-  "Use for running optimise on long lived connections. For query_only
-  connections makes the connection temporarily writable."
+  "Use for running optimize on long lived connections. Should only be run
+   on write connection. Uses 0x10002 flag to analyse all tables. This is
+   optimal for fresh connections and or read/write connections having
+   different query usage. It also means you only need to run optimize from
+   the write connection and not all read connections."
   [db]
   (let [n-conn (count (:conn-pool db))]
     (loop [n 0]
-      (if (= (first (q db ["pragma query_only"])) 1)
-        (do (q db ["pragma query_only=false"])
-            (q db ["pragma optimize"])
-            (q db ["pragma query_only=true"]))
-        (q db ["pragma optimize"]))
+      (q db ["pragma optimize=0x10002"])
       (if (> n-conn n) (recur (inc n)) n))))
 
 (defmacro with-read-tx
