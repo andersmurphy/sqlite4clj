@@ -20,10 +20,13 @@
 
 (defn- decode-edn
   "Decode Clojure data."
-  [^MemorySegment blob]
-  ;; This is faster than using read-once
+  [^MemorySegment blob size]
+  ;; Read exactly `size` bytes from the BLOB payload. Relying on C-string
+  ;; null terminators can leak random trailing bytes into EDN decoding.
   (edn/read-string
-    (.getString (.reinterpret ^MemorySegment blob Integer/MAX_VALUE) 0)))
+    (String. (.toArray (mem/slice blob 0 size)
+               java.lang.foreign.ValueLayout/JAVA_BYTE)
+      "UTF-8")))
 
 ;; -----------------------------
 ;; Public API
@@ -39,7 +42,7 @@
     (let [f-byte (mem/read-byte blob)
           blob   (mem/slice blob 1)]
       (if (= f-byte ENCODED_BLOB)
-        (decode-edn blob)
+        (decode-edn blob (dec size))
         ;; Otherwise
         (.toArray blob java.lang.foreign.ValueLayout/JAVA_BYTE)))
     (byte-array 0)))
