@@ -41,10 +41,14 @@
            (range 0 col-count)))))))
 
 (defn prepare-cached [{:keys [pdb stmt-cache]} query]
-  (let [sql    (first query)
+  (let [sql (first query)
         {:keys [stmt] :as m}
-        (cache/lookup-or-miss stmt-cache sql
-          (fn [_] (prepare pdb sql)))]
+        (let [v (cache/lookup stmt-cache sql ::cache-miss)]
+          (if (identical? ::cache-miss v)
+            (let [prepared (prepare pdb sql)]
+              (cache/miss stmt-cache sql prepared)
+              prepared)
+            v))]
     (bind stmt query)
     m))
 
@@ -263,20 +267,21 @@
   [[tx db] & body]
   `(if-let  [conn-pool# (:conn-pool ~db)]
      (let [~tx (BlockingQueue/.take conn-pool#)]
-       (binding [*print-length* nil]
-         (try
-           ~@body
-           (finally
-             (BlockingQueue/.offer conn-pool# ~tx)))))
+       (try
+         ~@body
+         (finally
+           (BlockingQueue/.offer conn-pool# ~tx))))
      (let [~tx ~db]
        (do ~@body))))
 
 (defn q
   "Run a query against a db. Return nil when no results."
-  [tx query &
-   [{:keys [result-set-fn]}] ]
-  (with-conn [conn tx]
-    (q* conn query result-set-fn)))
+  ([tx query]
+   (with-conn [conn tx]
+     (q* conn query nil)))
+  ([tx query {:keys [result-set-fn]}]
+   (with-conn [conn tx]
+     (q* conn query result-set-fn))))
 
 (defn optimize-db
   "Use for running optimize on long lived connections. Should only be run
