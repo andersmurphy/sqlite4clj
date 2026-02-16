@@ -234,6 +234,12 @@
    ::mem/pointer] ;; xDestroy (destructor)
   ::mem/int)
 
+(defcfn aggregate-context
+  sqlite3_aggregate_context
+  [::mem/pointer ;; sqlite3_context*
+   ::mem/int]    ;; nBytes
+  ::mem/pointer)
+
 (defcfn value-text
   sqlite3_value_text
   [::mem/pointer] ::mem/c-string)

@@ -4,6 +4,7 @@
   (:require
    [sqlite4clj.impl.api :as api]
    [sqlite4clj.impl.functions :as funcs]
+   [sqlite4clj.impl.functions-aggregates :as aggs]
    [clojure.core.cache.wrapped :as cache])
   (:import
    (java.util.concurrent BlockingQueue LinkedBlockingQueue)))
@@ -240,7 +241,8 @@
      :reader   reader
      ;; Prevents application function callback pointers from getting
      ;; garbage collected.
-     :internal {:app-functions (atom {})}}))
+     :internal {:app-functions  (atom {})
+                :app-aggregates (atom {})}}))
 
 (defmacro with-conn
   "Use the same connection for a series of queries (not a transaction) without
@@ -355,3 +357,42 @@
    (funcs/remove-function db name))
   ([db name arity]
    (funcs/remove-function db name arity)))
+
+(defn create-aggregate
+  "register a user-defined aggregate function with sqlite on all connections.
+
+   parameters:
+   - db: database from init-db!
+   - name: string function name
+   - step-f-or-var: step callback function or var
+   - final-f-or-var: final callback function or var
+   - opts: a map of options that can include:
+
+     the sqlite function flags (see https://www.sqlite.org/c3ref/c_deterministic.html)
+     - :deterministic? (boolean)
+     - :direct-only? (boolean)
+     - :innocuous? (boolean)
+     - :sub-type? (boolean)
+     - :result-sub-type? (boolean)
+     - :self-order1? (boolean)
+
+     aggregate options:
+     - :arity (int): SQL arity. -1 means variadic.
+     - :initial-state: initial step state used for empty inputs when provided.
+
+   by default SQL arity is inferred from step-f-or-var as:
+   sql arity = (step arity - 1) where the first argument is aggregate state.
+   step callbacks must have signature:
+   (fn [state & sql-args] new-state)
+   final callbacks must have signature:
+   (fn [state] result)"
+  [db name step-f-or-var final-f-or-var & {:as opts}]
+  (aggs/create-aggregate db name step-f-or-var final-f-or-var opts))
+
+(defn remove-aggregate
+  "unregister a user-defined aggregate from sqlite on all connections.
+  if an arity is not provided, it will unregister all arities for the aggregate."
+  ([db name]
+   (aggs/remove-aggregate db name))
+  ([db name arity]
+   (aggs/remove-aggregate db name arity)))
