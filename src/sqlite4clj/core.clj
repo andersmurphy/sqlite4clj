@@ -8,25 +8,29 @@
   (:import
    (java.util.concurrent BlockingQueue LinkedBlockingQueue)))
 
-(defn bind [stmt params]
-  (reduce
-    (fn [i param]
-      (cond
-        (integer? param) (api/bind-int    stmt i param)
-        (double? param)  (api/bind-double stmt i param)
-        (string? param)  (api/bind-text   stmt i param)
-        (nil? param)     (api/bind-null   stmt i)
-        :else            (api/bind-blob   stmt i param))
-      (inc i))
-    1 ;; starts at 1
-    params))
+(declare unwrap-result-set-fn)
+
+(defn bind [stmt query]
+  (let [n (count query)]
+    (loop [i 1
+           q 1]
+      (when (< q n)
+        (let [param (nth query q)]
+          (cond
+            (integer? param) (api/bind-int    stmt i param)
+            (double? param)  (api/bind-double stmt i param)
+            (string? param)  (api/bind-text   stmt i param)
+            (nil? param)     (api/bind-null   stmt i)
+            :else            (api/bind-blob   stmt i param))
+          (recur (inc i) (inc q)))))))
 
 (defn prepare
   ([pdb sql]
    (let [stmt      (api/prepare-v3 pdb sql)
          col-count (int #_{:clj-kondo/ignore [:type-mismatch]}
                      (api/column-count stmt))]
-     (cond-> {:stmt stmt}
+     (cond-> {:stmt stmt
+              :n-cols col-count}
        (> col-count 0)
        (assoc :col-metadata
          (mapv (fn [c]
@@ -38,11 +42,10 @@
 
 (defn prepare-cached [{:keys [pdb stmt-cache]} query]
   (let [sql    (first query)
-        params (subvec query 1)
         {:keys [stmt] :as m}
         (cache/lookup-or-miss stmt-cache sql
           (fn [_] (prepare pdb sql)))]
-    (bind stmt params)
+    (bind stmt query)
     m))
 
 (defmacro with-stmt-reset
@@ -109,29 +112,39 @@
   ;; that happens. Outside of this usage it will not come into play/cause
   ;; contention.
   (locking conn
-    (let [{:keys [stmt col-metadata]} (prepare-cached conn query)]
+    (let [{:keys [stmt col-metadata n-cols]} (prepare-cached conn query)]
       (with-stmt-reset [stmt stmt]
-        (let [n-cols        (int
-                              #_{:clj-kondo/ignore [:type-mismatch]}
-                       (api/column-count stmt))
-              result-set-fn (or result-set-fn (:default-result-set-fn conn))]
-          (result-set-fn col-metadata
-            (reify
-              clojure.lang.IReduceInit
-              (reduce [_ f init]
-                (loop [ret init]
-                  (let [code (int
-                               #_{:clj-kondo/ignore [:type-mismatch]}
-                               (api/step stmt))]
-                    (case code
-                      100 (let [result (f ret (column stmt n-cols))]
-                            (if (reduced? result)
-                              @result
-                              (recur result)))
-                      101 ret
-                      (throw (api/sqlite-ex-info (:pdb conn) code
-                               {:sql    (first query)
-                                :params (subvec query 1)})))))))))))))
+        (let [result-set-fn (or result-set-fn (:default-result-set-fn conn))]
+          (if (and (= n-cols 1)
+                   (identical? result-set-fn unwrap-result-set-fn))
+            (loop [ret (transient [])]
+              (let [code (int
+                           #_{:clj-kondo/ignore [:type-mismatch]}
+                           (api/step stmt))]
+                (case code
+                  100 (recur (conj! ret (get-column-val stmt 0)))
+                  101 (let [result (persistent! ret)]
+                        (when (seq result) result))
+                  (throw (api/sqlite-ex-info (:pdb conn) code
+                           {:sql    (first query)
+                            :params (subvec query 1)})))))
+            (result-set-fn col-metadata
+              (reify
+                clojure.lang.IReduceInit
+                (reduce [_ f init]
+                  (loop [ret init]
+                    (let [code (int
+                                 #_{:clj-kondo/ignore [:type-mismatch]}
+                                 (api/step stmt))]
+                      (case code
+                        100 (let [result (f ret (column stmt n-cols))]
+                              (if (reduced? result)
+                                @result
+                                (recur result)))
+                        101 ret
+                        (throw (api/sqlite-ex-info (:pdb conn) code
+                                 {:sql    (first query)
+                                  :params (subvec query 1)}))))))))))))))
 
 (def default-pragma
   {:cache_size         15625
