@@ -93,4 +93,19 @@
 
       (is (= 0 (first (d/q (:reader db) ["select count(*) from bar"])))))))
 
+(deftest encoding-edn
 
+  (testing "Handles *print-length* being set in user land."
+
+    (with-db [db (test-db)]
+      (d/q (:writer db)
+        ["CREATE TABLE IF NOT EXISTS encoding(id INT PRIMARY KEY, data BLOB)"])
+
+      (binding [*print-length* 1]
+        (d/q (:writer db)
+          ["INSERT INTO encoding (id, data) VALUES (?, ?)" 1
+           {:id 0, :email "bob@foobar.com", :username "bob"}]))
+
+      (is (= [{:id 0, :email "bob@foobar.com", :username "bob"}]
+             (d/q (:reader db)
+               ["select data from encoding where id = 1"]))))))

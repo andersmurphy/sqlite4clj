@@ -250,11 +250,10 @@
   [[tx db] & body]
   `(if-let  [conn-pool# (:conn-pool ~db)]
      (let [~tx (BlockingQueue/.take conn-pool#)]
-       (binding [*print-length* nil]
-         (try
-           ~@body
-           (finally
-             (BlockingQueue/.offer conn-pool# ~tx)))))
+       (try
+         ~@body
+         (finally
+           (BlockingQueue/.offer conn-pool# ~tx))))
      (let [~tx ~db]
        (do ~@body))))
 
@@ -283,19 +282,18 @@
   [[tx db] & body]
   `(let [conn-pool# (:conn-pool ~db)
          ~tx        (BlockingQueue/.take conn-pool#)]
-     (binding [*print-length* nil]
-       (try
-         (q ~tx ["BEGIN DEFERRED"])
-         ~@(butlast body)
-         (let [r# ~(last body)]
-           (q ~tx ["COMMIT"]) 
-           r#)
-         (catch Throwable t#
-           ;; Handles non SQLITE errors crashing a transaction
-           (q ~tx ["ROLLBACK"])
-           (throw t#))
-         (finally
-           (BlockingQueue/.offer conn-pool# ~tx))))))
+     (try
+       (q ~tx ["BEGIN DEFERRED"])
+       ~@(butlast body)
+       (let [r# ~(last body)]
+         (q ~tx ["COMMIT"])
+         r#)
+       (catch Throwable t#
+         ;; Handles non SQLITE errors crashing a transaction
+         (q ~tx ["ROLLBACK"])
+         (throw t#))
+       (finally
+         (BlockingQueue/.offer conn-pool# ~tx)))))
 
 (defmacro with-write-tx
   "Wrap series of queries in a write transaction."
@@ -303,19 +301,18 @@
   [[tx db] & body]
   `(let [conn-pool# (:conn-pool ~db)
          ~tx        (BlockingQueue/.take conn-pool#)]
-     (binding [*print-length* nil]
-       (try
-         (q ~tx ["BEGIN IMMEDIATE"])
-         ~@(butlast body)
-         (let [r# ~(last body)]
-           (q ~tx ["COMMIT"])
-           r#)
-         (catch Throwable t#
-           ;; Handles non SQLITE errors crashing a transaction
-           (q ~tx ["ROLLBACK"])
-           (throw t#))
-         (finally
-           (BlockingQueue/.offer conn-pool# ~tx))))))
+     (try
+       (q ~tx ["BEGIN IMMEDIATE"])
+       ~@(butlast body)
+       (let [r# ~(last body)]
+         (q ~tx ["COMMIT"])
+         r#)
+       (catch Throwable t#
+         ;; Handles non SQLITE errors crashing a transaction
+         (q ~tx ["ROLLBACK"])
+         (throw t#))
+       (finally
+         (BlockingQueue/.offer conn-pool# ~tx)))))
 
 ;; WAL + single writer enforced at the application layer means you don't need
 ;; to handle SQLITE_BUSY or SQLITE_LOCKED.
