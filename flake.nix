@@ -4,52 +4,34 @@
     nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1"; # tracks nixpkgs unstable branch
     flakelight.url = "github:nix-community/flakelight";
     flakelight.inputs.nixpkgs.follows = "nixpkgs";
+    zig.url = "github:mitchellh/zig-overlay";
   };
   outputs =
     {
       self,
       flakelight,
+      zig,
       ...
     }:
     flakelight ./. {
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+      nixpkgs.config.allowUnsupportedSystem = true;
       devShell =
         pkgs:
         let
-          javaVersion = "24";
+          javaVersion = "25";
           jdk = pkgs."jdk${javaVersion}";
           clojure = pkgs.clojure.override { inherit jdk; };
-          sqlite = (
-            pkgs.sqlite.overrideAttrs (oldAttrs: {
-              env.NIX_CFLAGS_COMPILE = (
-                toString [
-                  "-DSQLITE_THREADSAFE=2"
-                  "-DSQLITE_DEFAULT_MEMSTATUS=0"
-                  "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1"
-                  "-DSQLITE_LIKE_DOESNT_MATCH_BLOBS"
-                  "-DSQLITE_MAX_EXPR_DEPTH=0"                
-                  "-DSQLITE_OMIT_DEPRECATED"
-                  "-DSQLITE_OMIT_PROGRESS_CALLBACK"
-                  "-DSQLITE_OMIT_SHARED_CACHE"
-                  "-DSQLITE_USE_ALLOCA"
-                  "-DSQLITE_STRICT_SUBTYPE=1"
-                  "-DSQLITE_OMIT_AUTOINIT"
-                  "-DSQLITE_DISABLE_PAGECACHE_OVERFLOW_STATS"
-                  "-DSQLITE_ENABLE_STAT4"
-                  "-DSQLITE_ENABLE_RTREE"
-                  "-DSQLITE_ENABLE_FTS5"
-                  "-DSQLITE_MAX_MMAP_SIZE=1099511627776"
-                  "-DSQLITE_ENABLE_COLUMN_METADATA"
-                  "-DSQLITE_ENABLE_SESSION"
-                  "-DSQLITE_ENABLE_PREUPDATE_HOOK"
-                ]
-              );
-            })
-          );
-          libraries = [ sqlite ];
+          zigpkgs = zig.packages.${pkgs.system};
         in
         {
           packages = [
-            sqlite
+            zigpkgs."0.15.2"
             clojure
             jdk
             pkgs.clojure-lsp
@@ -58,9 +40,7 @@
             pkgs.babashka
             pkgs.git
           ];
-          env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath libraries;
         };
-
       flakelight.builtinFormatters = false;
       formatters = pkgs: {
         "*.nix" = "${pkgs.nixfmt}/bin/nixfmt";
