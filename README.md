@@ -17,7 +17,7 @@ Currently this library is not on maven so you have to add it via git deps (note:
 ```clojure
 andersmurphy/sqlite4clj
 {:git/url "https://github.com/andersmurphy/sqlite4clj"
- :git/sha "7cc1fc180c683a27aa3f91d434729eb07f9702f6"}
+ :git/sha "ecf9876626985d61bd27605ea6748aed25eaad87"}
 ```
 
 Initialise a db:
@@ -220,8 +220,9 @@ sqlite4clj automatically encodes any EDN object you pass it:
 ```
 
 This effectively lets you use SQLite as an EDN document store.
+When decoding BLOB values, sqlite4clj reads the exact SQLite BLOB size before parsing EDN.
 
-Encoding is done with [fast-edn](https://github.com/tonsky/fast-edn) as text and then converted into bytes. From my testing this was faster than both [deed](https://github.com/igrishaev/deed) and [nippy](https://github.com/taoensso/nippy) despite being a text format. Being a text format it is stable and can be swapped out for faster EDN text serialises without breaking changes. Of course, this also means only EDN data is support and not arbitrary Java classes.
+Encoding is done with [fast-edn](https://github.com/tonsky/fast-edn) as text and then converted into bytes. From my testing this was faster than both [deed](https://github.com/igrishaev/deed) and [nippy](https://github.com/taoensso/nippy) despite being a text format. Being a text format it is stable and can be swapped out for faster EDN text serialises without breaking changes. Of course, this also means only EDN data is supported and not arbitrary Java classes.
 
 ## Application functions
 
@@ -240,7 +241,55 @@ Declaring and using an application function:
 ;; [["46536a4a-0b1e-4749-9c01-f44f73de3b91" {:type "foo", :a 3, :b 3}]]
 ```
 
-When dealing with columns that are encoded EDN blobs they will automatically decoded.
+When dealing with columns that are encoded EDN blobs they will automatically be decoded.
+
+You can unregister scalar functions with:
+
+```clojure
+(d/remove-function db "entity_type")
+;; optional arity-specific removal:
+(d/remove-function db "entity_type" 1)
+```
+
+## Application aggregates
+
+SQLite also supports [Application-Defined Aggregate Functions](https://www.sqlite.org/appfunc.html). sqlite4clj exposes these via `d/create-aggregate`.
+
+The aggregate step callback receives `[state & sql-args]`, and arity is inferred as `step-arity - 1` by default:
+
+```clojure
+(d/create-aggregate db "sum_n"
+  (fn [state n]
+    (+ (or state 0) n))
+  (fn [state] state)
+  {:deterministic? true})
+
+(d/q (:reader db) ["SELECT sum_n(checks) FROM session"])
+;; =>
+;; [42]
+```
+
+You can also:
+
+- pass vars (for repl-driven redefinition), e.g. `#'sum-step` and `#'sum-final`
+- set `:arity` explicitly (`-1` for variadic aggregates)
+- set `:initial-state` to control empty-input results
+- remove aggregates with `d/remove-aggregate` (optionally by arity)
+
+```clojure
+(d/create-aggregate db "sum_empty_init"
+  (fn [state n] (+ (or state 0) n))
+  (fn [state] state)
+  {:initial-state 10})
+
+(d/q (:writer db) ["SELECT sum_empty_init(n) FROM (SELECT 1 AS n WHERE 0)"])
+;; =>
+;; [10]
+
+(d/remove-aggregate db "sum_n")
+;; optional arity-specific removal:
+(d/remove-aggregate db "sum_n" 1)
+```
 
 ## Indexing on encoded edn blobs
 
