@@ -14,8 +14,7 @@
 
 (defonce db
   (d/init-db! "database.db"
-    {:read-only true
-     :pool-size 4
+    {:pool-size 4
      :pragma    {:foreign_keys false}}))
 
 (def reader  (db :reader))

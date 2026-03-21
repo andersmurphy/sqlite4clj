@@ -2,9 +2,8 @@
   (:require [sqlite4clj.core :as d]))
 
 (defonce db
-  (d/init-db! "database.db"
-    {:read-only true
-     :pool-size 4
+  (d/init-db! "index-edn.db"
+    {:pool-size 4
      :pragma    {:foreign_keys false}}))
 
 (def reader  (db :reader))

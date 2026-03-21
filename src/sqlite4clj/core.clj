@@ -147,9 +147,6 @@
    ;; So we set it to the recommended value see:
    ;;  https://litestream.io/tips/#busy-timeout
    :busy_timeout       5000
-   ;; Litestream recommends disabling autocheckpointing under high write loads
-   ;; https://litestream.io/tips/#disable-autocheckpoints-for-high-write-load-servers
-   :wal_autocheckpoint 0
    ;; :optimize cannot be run on connection open when using application
    ;; function in indexes. As you will get a unknown function error.
    ;; https://sqlite.org/pragma.html#pragma_optimize
