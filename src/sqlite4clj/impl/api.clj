@@ -171,12 +171,24 @@
    ::mem/pointer] ::mem/int
   sqlite3-bind-blob-native
   [pdb idx blob]
-  (let [blob   (enc/encode blob)
-        blob-l (count blob)]
-    (sqlite3-bind-blob-native pdb idx
-      (mem/serialize blob [::mem/array ::mem/byte blob-l])
-      blob-l
-      sqlite-transient)))
+  (if (bytes? blob)
+    ;; when writing a byte[], special case it to prevent needles array copies
+    (let [blob-l (alength ^bytes blob)
+          total  (unchecked-inc-int blob-l)]
+      (with-open [arena (mem/confined-arena)]
+        (let [segment (.allocate arena (long total))]
+          (mem/write-byte segment enc/RAW_BLOB)
+          (mem/write-bytes segment blob-l 1 ^bytes blob)
+          (sqlite3-bind-blob-native pdb idx
+            segment
+            total
+            sqlite-transient))))
+    (let [blob   (enc/encode blob)
+          blob-l (count blob)]
+      (sqlite3-bind-blob-native pdb idx
+        (mem/serialize blob [::mem/array ::mem/byte blob-l])
+        blob-l
+        sqlite-transient))))
 
 (defcfn step
   sqlite3_step
