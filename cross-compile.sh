@@ -11,9 +11,14 @@ do
     if [[ "$target" == *-windows-* ]]; then
         dl=''
         extension="dll"
+        symbolic=''
     else
         dl='-ldl'
         extension="so"
+        symbolic=''
+        if [[ "$target" == *-linux-* ]]; then
+            symbolic='-Wl,-Bsymbolic'
+        fi
     fi
     echo "##### Building $target ####"
     zig cc -shared -Os -I. -fPIC -DSQLITE_DQS=0 \
@@ -36,7 +41,7 @@ do
         -DSQLITE_ENABLE_COLUMN_METADATA \
         -DSQLITE_ENABLE_SESSION \
         -DSQLITE_ENABLE_PREUPDATE_HOOK \
-        sqlite3.c -lpthread $dl -lm -o sqlite3.so -target $target
+        sqlite3.c -lpthread $dl -lm $symbolic -o sqlite3.so -target $target
     cp -v sqlite3.so ../resources/sqlite3_$target.$extension
 done
 
