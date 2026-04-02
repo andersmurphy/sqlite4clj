@@ -64,9 +64,9 @@
 
 (defcfn initialize
   sqlite3_initialize
-  [::mem/pointer] ::mem/int)
+  [] ::mem/int)
 
-(defonce init-lib (initialize nil))
+(defonce init-lib (initialize))
 
 (defcfn free
   sqlite3_free
