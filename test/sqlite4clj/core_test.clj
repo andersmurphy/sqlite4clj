@@ -109,3 +109,18 @@
       (is (= [{:id 0, :email "bob@foobar.com", :username "bob"}]
              (d/q (:reader db)
                ["select data from encoding where id = 1"]))))))
+
+(deftest encoding-raw-byte-arrays
+  (testing "Raw byte arrays round-trip unchanged and keep the prefixed blob format."
+    (with-db [db (test-db)]
+      (d/q (:writer db)
+        ["CREATE TABLE IF NOT EXISTS raw_bytes(id INT PRIMARY KEY, data BLOB)"])
+      (let [payload (byte-array [1 2 3 4 5])]
+        (d/q (:writer db)
+          ["INSERT INTO raw_bytes (id, data) VALUES (?, ?)" 1 payload])
+        (let [[stored-bytes] (d/q (:reader db)
+                              ["select data from raw_bytes where id = 1"])
+              [stored-length] (d/q (:reader db)
+                               ["select length(data) from raw_bytes where id = 1"])]
+          (is (= (seq payload) (seq stored-bytes)))
+          (is (= (inc (alength payload)) stored-length)))))))
