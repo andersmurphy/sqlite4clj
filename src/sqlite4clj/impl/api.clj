@@ -7,7 +7,10 @@
    [coffi.mem :as mem]
    [sqlite4clj.impl.encoding :as enc])
   (:import
-   [java.nio.file Files]))
+   [java.nio.file Files]
+   [java.lang.foreign MemorySegment]))
+
+(set! *warn-on-reflection* true)
 
 (def SQLITE_UTF8 1)
 (def SQLITE_DETERMINISTIC 0x000000800)
@@ -171,23 +174,10 @@
    ::mem/pointer] ::mem/int
   sqlite3-bind-blob-native
   [pdb idx blob]
-  (if (bytes? blob)
-    ;; when writing a byte[], special case it to prevent needles array copies
-    (let [blob-l (alength ^bytes blob)
-          total  (unchecked-inc-int blob-l)]
-      (with-open [arena (mem/confined-arena)]
-        (let [segment (.allocate arena (long total))]
-          (mem/write-byte segment enc/RAW_BLOB)
-          (mem/write-bytes segment blob-l 1 ^bytes blob)
-          (sqlite3-bind-blob-native pdb idx
-            segment
-            total
-            sqlite-transient))))
-    (let [blob   (enc/encode blob)
-          blob-l (count blob)]
-      (sqlite3-bind-blob-native pdb idx
-        (mem/serialize blob [::mem/array ::mem/byte blob-l])
-        blob-l
+  (with-open [arena (mem/confined-arena)]
+    (let [segment (enc/encode arena blob)]
+      (sqlite3-bind-blob-native pdb idx segment
+        (MemorySegment/.byteSize segment)
         sqlite-transient))))
 
 (defcfn step
@@ -312,12 +302,10 @@
   [::mem/pointer ::mem/pointer ::mem/int ::mem/pointer] ::mem/void
   sqlite3-result-blob-native
   [context blob]
-  (let [blob   (enc/encode blob)
-        blob-l (count blob)]
+  (with-open [arena (mem/confined-arena)]
+    (let [segment   (enc/encode arena blob)]
     (sqlite3-result-blob-native context
-      (mem/serialize blob [::mem/array ::mem/byte blob-l])
-      blob-l
-      sqlite-transient)))
+      segment (MemorySegment/.byteSize segment) sqlite-transient))))
 
 (defcfn result-error
   "sqlite3_result_error"

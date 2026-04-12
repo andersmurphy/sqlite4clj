@@ -1,22 +1,10 @@
 (ns sqlite4clj.impl.encoding
   (:require [coffi.mem :as mem]
             [fast-edn.core :as edn])
-  (:import [java.lang.foreign MemorySegment]))
+  (:import [java.lang.foreign MemorySegment SegmentAllocator]))
 
 (def RAW_BLOB (byte 0))
 (def ENCODED_BLOB (byte 2))
-
-(defn- add-leading-byte ^byte/1 [blob leading-byte]
-  (let [out (byte-array (inc (count blob)) [leading-byte])]
-    (System/arraycopy blob 0 out 1 (count blob))
-    out))
-
-(defn- encode-edn
-  "Encode Clojure data."
-  [blob]
-  (let [blob (binding [*print-length* nil]
-               (String/.getBytes (pr-str blob)))]
-    (add-leading-byte blob ENCODED_BLOB)))
 
 (defn- decode-edn
   "Decode Clojure data."
@@ -31,10 +19,17 @@
 ;; -----------------------------
 ;; Public API
 
-(defn encode [blob]
-  (if (bytes? blob)
-    (add-leading-byte blob RAW_BLOB)
-    (encode-edn blob)))
+(defn encode ^MemorySegment [arena blob]
+  (let [b            (if (bytes? blob) blob
+                         (binding [*print-length* nil]
+                           (String/.getBytes (pr-str blob))))
+        leading-byte (if (bytes? blob) RAW_BLOB ENCODED_BLOB)
+        b-l          (alength ^bytes b)
+        total        (unchecked-inc-int b-l)
+        segment      (SegmentAllocator/.allocate arena (long total))]
+    (mem/write-byte segment leading-byte)
+    (mem/write-bytes segment b-l 1 ^bytes b)
+    segment))
 
 (defn decode [blob size]
   (if (pos? size)
