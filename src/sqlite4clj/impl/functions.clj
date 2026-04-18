@@ -86,7 +86,8 @@
       2 (api/value-double sqlite-value) ;; SQLITE_FLOAT
       3 (api/value-text sqlite-value)   ;; SQLITE_TEXT
       4 (api/value-blob sqlite-value)   ;; SQLITE_BLOB
-      5 nil)))                          ;; SQLITE_NULL
+      5 nil                             ;; SQLITE_NULL
+      )))
 
 (defn wrap-scalar-function
   "Wrap a Clojure function to be used as a SQLite scalar function callback.
@@ -167,37 +168,33 @@
      - var           - optional var that is holding the fn
      - watch-key     - optional watch-key for the var"
   [db name f arities flags-bitmask var watch-key]
-  (let [registrations (vec
-                        (for [n arities]
-                          (let [arity        (if (= n :variadic) -1 n)
-                                callback     (wrap-scalar-function f)
-                                callback-ptr (mem/serialize callback
-                                               [::ffi/fn
-                                                [::mem/pointer ::mem/int ::mem/pointer]
-                                                ::mem/void
-                                                :raw-fn? true]
-                                               (mem/global-arena))]
-                            (doto-connections db
-                              (fn [conn]
-                                (let [pdb  (:pdb conn)
-                                      code (api/create-function-v2 pdb name arity flags-bitmask mem/null
-                                             callback-ptr mem/null mem/null mem/null)]
-                                  (when-not (api/sqlite-ok? code)
-                                    (throw (api/sqlite-ex-info pdb code {:function name}))))))
-                            {:arity arity
-                             :data  {:flags        flags-bitmask
-                                     :callback     callback
-                                     :callback-ptr callback-ptr}})))
-        metadata      (when var
-                        {:var var :watch-key watch-key})]
+  (let [new-arities
+        (->> arities
+          (map
+            (fn [n]
+              (let [arity        (if (= n :variadic) -1 n)
+                    callback     (wrap-scalar-function f)
+                    callback-ptr (mem/serialize callback
+                                   [::ffi/fn
+                                    [::mem/pointer ::mem/int ::mem/pointer]
+                                    ::mem/void
+                                    :raw-fn? true]
+                                   (mem/global-arena))]
+                (doto-connections db
+                  (fn [conn]
+                    (let [pdb  (:pdb conn)
+                          code (api/create-function-v2 pdb name arity flags-bitmask mem/null
+                                 callback-ptr mem/null mem/null mem/null)]
+                      (when-not (api/sqlite-ok? code)
+                        (throw (api/sqlite-ex-info pdb code {:function name}))))))
+                [arity {:flags        flags-bitmask
+                        :callback     callback
+                        :callback-ptr callback-ptr}])))
+          (into {})
+          (merge (when var {:meta {:var var :watch-key watch-key}})))]
     (swap! (get-in db [:internal :app-functions])
       update name
-      (fn [existing]
-        (let [new-arities (into {}
-                            (for [{:keys [arity data]} registrations]
-                              [arity data]))]
-          (cond-> (merge existing new-arities)
-            metadata (assoc :meta metadata)))))))
+      (fn [existing] (merge existing new-arities)))))
 
 (defn register-function
   [db name f & {:keys [arity] :as opts}]
