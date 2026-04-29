@@ -19,6 +19,7 @@
 (def SQLITE_SUBTYPE 0x000100000)
 (def SQLITE_RESULT_SUBTYPE 0x001000000)
 (def SQLITE_SELFORDER1 0x002000000)
+(def SQLITE_CONFIG_MEMSTATUS 9)
 
 (defn copy-resource [resource-path output-path]
   (with-open [in  (io/input-stream (io/resource resource-path))
@@ -69,7 +70,36 @@
   sqlite3_initialize
   [] ::mem/int)
 
-(defonce init-lib (initialize))
+;; sqlite3_config is variadic in C; for SQLITE_CONFIG_MEMSTATUS the trailing
+;; argument is a single int. Declaring as (int, int) -> int works on the
+;; supported platforms (x86_64 + aarch64 on Linux/macOS) for this signature.
+(defcfn config-int
+  sqlite3_config
+  [::mem/int ::mem/int] ::mem/int)
+
+(defcfn memory-used
+  "Bytes currently allocated by SQLite globally in this process.
+  Returns 0 unless memstatus is enabled (see -Dsqlite4clj.memstatus=true)."
+  sqlite3_memory_used
+  [] ::mem/long)
+
+(defcfn memory-highwater
+  "High-water mark in bytes of SQLite's global allocator since process start
+  (or since the last reset). Pass reset?=1 to reset the high-water mark.
+  Returns 0 unless memstatus is enabled (see -Dsqlite4clj.memstatus=true)."
+  sqlite3_memory_highwater
+  [::mem/int] ::mem/long)
+
+;; SQLite's bundled binaries are built with SQLITE_DEFAULT_MEMSTATUS=0 so the
+;; sqlite3_memory_used / sqlite3_memory_highwater counters are no-ops by
+;; default (returning 0). Setting -Dsqlite4clj.memstatus=true enables them at
+;; the cost of one extra atomic increment per allocation. Must be configured
+;; before sqlite3_initialize, so we do it here just before init-lib runs.
+(defonce init-lib
+  (do
+    (when (= "true" (System/getProperty "sqlite4clj.memstatus"))
+      (config-int SQLITE_CONFIG_MEMSTATUS 1))
+    (initialize)))
 
 (defcfn free
   sqlite3_free

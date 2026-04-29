@@ -273,6 +273,21 @@
       (q db ["pragma optimize=0x10002"])
       (if (> n-conn n) (recur (inc n)) n))))
 
+(defn memory-used
+  "Bytes currently allocated by SQLite globally in this process across all
+  open connections. Returns 0 unless memstatus is enabled at startup with
+  -Dsqlite4clj.memstatus=true."
+  ^long []
+  (api/memory-used))
+
+(defn memory-highwater
+  "High-water mark in bytes of SQLite's global allocator since process start
+  (or since the last reset). Pass reset?=true to reset the high-water mark.
+  Returns 0 unless memstatus is enabled at startup with
+  -Dsqlite4clj.memstatus=true."
+  (^long [] (api/memory-highwater 0))
+  (^long [reset?] (api/memory-highwater (if reset? 1 0))))
+
 (defmacro with-read-tx
   "Wrap series of queries in a read transaction."
   {:clj-kondo/lint-as 'clojure.core/with-open}
