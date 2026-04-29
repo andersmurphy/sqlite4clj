@@ -362,6 +362,29 @@ So something like this should work:
      :escape-slash false)})
 ```
 
+## Memory observability
+
+The bundled SQLite binaries are compiled with `SQLITE_DEFAULT_MEMSTATUS=0` for
+performance, which means `sqlite3_memory_used()` and `sqlite3_memory_highwater()`
+always return 0. To enable global memory accounting, start the JVM with:
+
+```
+-Dsqlite4clj.memstatus=true
+```
+
+When enabled, you can call:
+
+```clojure
+(sqlite4clj.core/memory-used)        ;; bytes currently allocated by SQLite
+(sqlite4clj.core/memory-highwater)   ;; high-water mark since process start
+(sqlite4clj.core/memory-highwater true) ;; read and reset the high-water mark
+```
+
+The cost of enabling memstatus is one extra atomic increment per SQLite
+allocation — measurable but tiny. Useful for diagnosing OOMs caused by
+SQLite's per-connection page caches and prepared-statement caches, which
+otherwise live outside the JVM heap and don't show up in heap dumps.
+
 ## Loading the Native Library
 
 Bundled in the classpath is pre-built libsqlite3 shared library for:
