@@ -41,6 +41,7 @@ do
         -DSQLITE_ENABLE_COLUMN_METADATA \
         -DSQLITE_ENABLE_SESSION \
         -DSQLITE_ENABLE_PREUPDATE_HOOK \
+        -DSQLITE_EXTRA_INIT=core_init \
         sqlite3.c -lpthread $dl -lm $symbolic -o sqlite3.so -target $target
     cp -v sqlite3.so ../resources/sqlite3_$target.$extension
 done
