@@ -224,6 +224,22 @@
            :pragma    (merge pragma writer-pragma)
            :vfs       vfs
            :default-result-set-fn default-result-set-fn})
+        ;; Force -wal/-shm files to materialize before opening the
+        ;; read-only reader pool.  On a fresh WAL database, the writer
+        ;; pool sets journal_mode=WAL but no -shm/-wal files exist yet
+        ;; (no write has happened).  The read-only reader pool then
+        ;; cannot create them, and pragmas like cache_size fail with
+        ;; SQLITE_CANTOPEN ("unable to open database file").  A no-op
+        ;; write transaction here creates -wal/-shm so the reader can
+        ;; attach.
+        _ (when-not (= ":memory:" url)
+            (let [conn-pool (:conn-pool writer)
+                  conn      (BlockingQueue/.take conn-pool)]
+              (try
+                (q* conn ["BEGIN IMMEDIATE"] default-result-set-fn)
+                (q* conn ["COMMIT"] default-result-set-fn)
+                (finally
+                  (BlockingQueue/.offer conn-pool conn)))))
         ;; Pool of read connections
         reader (if (= ":memory:" url)
                  writer

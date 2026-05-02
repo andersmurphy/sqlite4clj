@@ -124,3 +124,21 @@
                                ["select length(data) from raw_bytes where id = 1"])]
           (is (= (seq payload) (seq stored-bytes)))
           (is (= (inc (alength payload)) stored-length)))))))
+
+(deftest init-db-on-fresh-wal-database
+  (testing "init-db! succeeds on a brand-new file with default WAL pragmas.
+
+  Regression: without a write-tx warmup between writer and reader pool init,
+  the read-only reader pool could not attach to a fresh WAL database (no
+  -shm/-wal files exist yet, and a read-only connection cannot create them),
+  causing pragmas like cache_size to fail with SQLITE_CANTOPEN."
+    (let [path "test-data/fresh-wal.db"]
+      (clojure.java.io/delete-file (clojure.java.io/file path) true)
+      (clojure.java.io/delete-file (clojure.java.io/file (str path "-shm")) true)
+      (clojure.java.io/delete-file (clojure.java.io/file (str path "-wal")) true)
+      (with-db [db (d/init-db! path {:pool-size 2})]
+        (is (some? (:writer db)))
+        (is (some? (:reader db)))
+        (d/q (:writer db) ["CREATE TABLE t (x INT)"])
+        (d/q (:writer db) ["INSERT INTO t VALUES (1)"])
+        (is (= [1] (d/q (:reader db) ["SELECT x FROM t"])))))))
