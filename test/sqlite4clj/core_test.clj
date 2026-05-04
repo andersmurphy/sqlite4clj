@@ -126,12 +126,14 @@
           (is (= (inc (alength payload)) stored-length)))))))
 
 (deftest init-db-on-fresh-wal-database
-  (testing "init-db! succeeds on a brand-new file with default WAL pragmas.
+  (testing "init-db! works on a brand-new file with default WAL pragmas.
 
-  Regression: without a write-tx warmup between writer and reader pool init,
-  the read-only reader pool could not attach to a fresh WAL database (no
-  -shm/-wal files exist yet, and a read-only connection cannot create them),
-  causing pragmas like cache_size to fail with SQLITE_CANTOPEN."
+  This is a smoke test, not a strict regression test: the fresh-WAL failure
+  this change defends against (see the comment in init-db!) does not
+  reliably reproduce against the bundled SQLite in a fresh JVM, even though
+  it has been observed in production on macOS and is reproducible at the
+  SQLite CLI level (3.51.0).  This test just verifies that the warmup tx
+  doesn't break the normal happy path."
     (let [path "test-data/fresh-wal.db"]
       (clojure.java.io/delete-file (clojure.java.io/file path) true)
       (clojure.java.io/delete-file (clojure.java.io/file (str path "-shm")) true)

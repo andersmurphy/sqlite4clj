@@ -224,14 +224,24 @@
            :pragma    (merge pragma writer-pragma)
            :vfs       vfs
            :default-result-set-fn default-result-set-fn})
-        ;; Force -wal/-shm files to materialize before opening the
-        ;; read-only reader pool.  On a fresh WAL database, the writer
+        ;; Defensive: force -wal/-shm files to materialize before opening
+        ;; the read-only reader pool.  On a fresh WAL database the writer
         ;; pool sets journal_mode=WAL but no -shm/-wal files exist yet
-        ;; (no write has happened).  The read-only reader pool then
-        ;; cannot create them, and pragmas like cache_size fail with
-        ;; SQLITE_CANTOPEN ("unable to open database file").  A no-op
-        ;; write transaction here creates -wal/-shm so the reader can
-        ;; attach.
+        ;; (no write has happened).  Per SQLite WAL docs §5, a
+        ;; SQLITE_OPEN_READONLY connection can attach to a WAL DB only if
+        ;; -shm/-wal already exist or the database is opened immutable.
+        ;; macOS's stock sqlite3 3.51.0 demonstrates this deterministically:
+        ;;
+        ;;   $ sqlite3 fresh.db "PRAGMA journal_mode=WAL;"
+        ;;   $ sqlite3 -readonly fresh.db "PRAGMA cache_size=15625;"
+        ;;   Error: in prepare, unable to open database file (14)
+        ;;
+        ;; The bundled SQLite 3.51.3 in this library is more permissive in
+        ;; isolated tests, but the failure has been observed in production
+        ;; on macOS — likely a timing/VFS interaction that does not
+        ;; reliably reproduce in a fresh JVM.  A no-op write tx here is
+        ;; the cheapest way to satisfy the docs' condition (1) regardless
+        ;; of which SQLite/OS quirks are in play.
         _ (when-not (= ":memory:" url)
             (let [conn-pool (:conn-pool writer)
                   conn      (BlockingQueue/.take conn-pool)]
