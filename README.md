@@ -435,6 +435,7 @@ gcc -shared -Os -I. -fPIC -DSQLITE_DQS=0 \
    -DSQLITE_ENABLE_COLUMN_METADATA \
    -DSQLITE_ENABLE_SESSION \
    -DSQLITE_ENABLE_PREUPDATE_HOOK \
+   -DSQLITE_EXTRA_INIT=core_init \
    sqlite3.c -lpthread -ldl -lm -o sqlite3.so
 ```
 
