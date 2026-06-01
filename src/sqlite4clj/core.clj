@@ -255,6 +255,7 @@
                              {:read-only true
                               :pool-size pool-size
                               :pragma    pragma
+                              :limits    limits
                               :vfs       vfs
                               :default-result-set-fn default-result-set-fn}))]
     {:writer   writer
