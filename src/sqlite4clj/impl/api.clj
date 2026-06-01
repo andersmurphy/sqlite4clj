@@ -3,13 +3,13 @@
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [coffi.ffi :as ffi :refer [defcfn]]
+   [coffi.ffi :as ffi]
    [coffi.mem :as mem]
-   [sqlite4clj.impl.encoding :as enc])
+   [sqlite4clj.impl.encoding :as enc]
+   [sqlite4clj.impl.ffi-wrapper :as ffi-wrapper :refer [defcfn]])
   (:import
    [java.nio.file Files]
-   [coffi.ffi Loader]
-   [java.lang.foreign Arena MemorySegment SymbolLookup]))
+   [java.lang.foreign MemorySegment]))
 
 (set! *warn-on-reflection* true)
 
@@ -26,20 +26,6 @@
   (with-open [in  (io/input-stream (io/resource resource-path))
               out (io/output-stream (io/file output-path))]
     (io/copy in out)))
-
-(defonce ^Arena sqlite-lookup-arena
-  (Arena/global))
-
-(defn scoped-library-lookup
-  "This function should be used instead of ffi/load-library as it
-  uses SymbolLookup instead of Linker.nativeLinker.defaultLookup. This
-  avoids situation where a system library gets loaded before the
-  bundled library leading to all sorts of shadowing/interposition chaos."
-  [path]
-  (let [path  ^String (.getAbsolutePath (io/file path))
-        field (.getDeclaredField Loader "lookup")]
-    (.setAccessible field true)
-    (.set field nil (SymbolLookup/libraryLookup path sqlite-lookup-arena))))
 
 (defn get-arch+os []
   (let [os-name (str/lower-case (System/getProperty "os.name"))]
@@ -64,7 +50,7 @@
            "amd64-windows") "sqlite3_x86_64-windows-gnu.dll")
         temp-lib-filename (str "sqlite4clj_temp_" res-file)]
     (copy-resource res-file temp-lib-filename)
-    (scoped-library-lookup temp-lib-filename)
+    (ffi-wrapper/set-library! temp-lib-filename)
     ;; We delete once loaded
     (Files/deleteIfExists (.toPath (io/file temp-lib-filename)))))
 
@@ -79,7 +65,7 @@
       (= src "bundled")) (load-bundled-library)
     (= src "system")     (load-system-library)
     :else
-    (scoped-library-lookup src)))
+    (ffi-wrapper/set-library! src)))
 
 (defcfn initialize
   sqlite3_initialize

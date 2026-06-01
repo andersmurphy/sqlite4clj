@@ -1,0 +1,3 @@
+{:hooks
+ {:analyze-call
+  {sqlite4clj.impl.ffi-wrapper/defcfn hooks.coffi/defcfn}}}

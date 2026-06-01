@@ -1,6 +1,7 @@
 (ns sqlite4clj.session
   (:require
-   [coffi.ffi :as ffi :refer [defcfn]]
+   [sqlite4clj.impl.ffi-wrapper :as ffi-wraper :refer [defcfn]]
+   [coffi.ffi :as ffi]
    [coffi.mem :as mem]
    [sqlite4clj.impl.api :as api]
    [sqlite4clj.core :as d]))

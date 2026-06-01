@@ -70,6 +70,4 @@
           p))
       (fn tx! [thunk] (swap! batch_ conj thunk) nil))))
 
-;; TODO: What if this was only for CQRS? Don't have to deal with promises
-;; simplifies code
-;; TODO: should be able to set a maximum batch run rate (i.e max FPS)?
+

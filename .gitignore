@@ -3,8 +3,7 @@
 .*
 !.github
 !.gitignore
-.clj-kondo
+!.clj-kondo
 !.clj-kondo/config.edn
-!.clj-kondo/app/*
 !.env.edn
 /sqlite-amalgamation/sqlite3.so
