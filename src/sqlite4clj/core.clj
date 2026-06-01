@@ -153,6 +153,27 @@
    ;; :optimize     0x10002
    })
 
+(def ^:private limit-key->limit-id
+  {:length              0
+   :sql-length          1
+   :column              2
+   :expr-depth          3
+   :compound-select     4
+   :vdbe-op             5
+   :function-arg        6
+   :attached            7
+   :like-pattern-length 8
+   :variable-number     9
+   :trigger-depth       10
+   :worker-threads      11
+   :parser-depth        12})
+
+(defn- set-limits [{:keys [pdb] :as _conn} limits]
+  (run! (fn [[k v]]
+          (when-let [limit-id (limit-key->limit-id k)]
+            (api/sqlite3-limit pdb limit-id (int v))))
+    limits))
+
 (defn pragma->set-pragma-query [pragma]
   (conj (->> (merge default-pragma pragma)
           (mapv (fn [[k v]] [(str "pragma " (name k) "=" v)])))))
@@ -172,7 +193,8 @@
                  result-set)]
     (when (seq result) result)))
 
-(defn new-conn! [db-name pragma read-only vfs default-result-set-fn]
+(defn new-conn! [db-name {:keys [pragma read-only vfs default-result-set-fn
+                                 limits]}]
   (let [flags           (if read-only
                           ;; SQLITE_OPEN_READONLY
                           0x00000001
@@ -183,17 +205,18 @@
         conn            {:pdb                   *pdb
                          :stmt-cache            statement-cache
                          :default-result-set-fn default-result-set-fn}]
+    (set-limits conn limits)
     (->> (pragma->set-pragma-query pragma)
       (run! #(q* conn % default-result-set-fn)))
     conn))
 
 (defn init-pool!
-  [db-name & [{:keys [pool-size pragma read-only vfs default-result-set-fn]
+  [db-name & [{:keys [pool-size]
                :or   {pool-size
-                      (Runtime/.availableProcessors (Runtime/getRuntime))}}]]
+                      (Runtime/.availableProcessors (Runtime/getRuntime))}
+               :as opts}]]
   (let [conns (repeatedly pool-size
-                (fn [] (new-conn! db-name pragma read-only vfs
-                         default-result-set-fn)))
+                (fn [] (new-conn! db-name opts)))
         pool  (LinkedBlockingQueue/new ^int pool-size)]
     (run! #(BlockingQueue/.add pool %) conns)
     {:conn-pool   pool
@@ -212,7 +235,7 @@
   "A db consists of a read pool of size :pool-size and a write pool of size 1.
   The same pragma are set for both pools."
   [url & [{:keys [pool-size pragma writer-pragma vfs
-                  default-result-set-fn]
+                  default-result-set-fn limits writer-limits]
            :or   {default-result-set-fn unwrap-result-set-fn
                   pool-size (Runtime/.availableProcessors
                               (Runtime/getRuntime))}}]]
@@ -220,9 +243,10 @@
   (let [;; Only one write connection
         writer
         (init-pool! url
-          {:pool-size 1
-           :pragma    (merge pragma writer-pragma)
-           :vfs       vfs
+          {:pool-size             1
+           :pragma                (merge pragma writer-pragma)
+           :limits                (merge limits writer-limits)
+           :vfs                   vfs
            :default-result-set-fn default-result-set-fn})
         ;; Pool of read connections
         reader (if (= ":memory:" url)
