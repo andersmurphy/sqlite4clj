@@ -386,3 +386,18 @@
   ;; SQLite to the next.
   sqlite3_column_name
   [::mem/pointer ::mem/int] ::mem/c-string)
+
+(defcfn sqlite3-limit
+  "https://sqlite.org/c3ref/limit.html"
+  sqlite3_limit
+  [::mem/pointer ::mem/int ::mem/int] ::mem/int)
+
+(defcfn sqlite3-interrupt
+  "https://sqlite.org/c3ref/interrupt.html"  
+  sqlite3_interrupt
+  [::mem/pointer] ::mem/int)
+
+(defcfn sqlite3-is-interrupted
+  "https://sqlite.org/c3ref/interrupt.html"
+  sqlite3_is_interrupted
+  [::mem/pointer] ::mem/int)

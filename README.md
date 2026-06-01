@@ -161,8 +161,7 @@ You can also set the `result-set-fn` for all connections on a database with `def
 ```clojure
 (defonce db
   (d/init-db! "database.db"
-    {:read-only true
-     :pool-size 4
+    {:pool-size 4
      :pragma    {:foreign_keys false}
      :default-result-set-fn d/qualified-keyword-result-set-fn}))
 ```
