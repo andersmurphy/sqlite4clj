@@ -30,5 +30,5 @@
          ((:close (:writer ~db-sym)))
          ((:close (:reader ~db-sym)))))))
 
-(defn test-db []
-  (d/init-db! test-db-path {:pool-size 2}))
+(defn test-db [& [opts]]
+  (d/init-db! test-db-path (merge {:pool-size 2} opts)))

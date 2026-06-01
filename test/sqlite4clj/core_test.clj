@@ -124,3 +124,11 @@
                                ["select length(data) from raw_bytes where id = 1"])]
           (is (= (seq payload) (seq stored-bytes)))
           (is (= (inc (alength payload)) stored-length)))))))
+
+(deftest limits-can-be-set-at-db-init
+  (testing "Attached limit prevents connections from attaching."
+    (with-db [db (test-db {:limits {:attached 0}})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+            #"too many attached databases - max 0"
+            (d/q (:writer db)
+              ["ATTACH DATABASE 'test-data/test.db'AS other"]))))))
