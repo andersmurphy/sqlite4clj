@@ -174,9 +174,22 @@
             (api/sqlite3-limit pdb limit-id (int v))))
     limits))
 
-(defn pragma->set-pragma-query [pragma]
-  (conj (->> (merge default-pragma pragma)
-          (mapv (fn [[k v]] [(str "pragma " (name k) "=" v)])))))
+(def ^:private read-only-skipped-pragmas
+  "Pragmas that can require a database header write when set. Converting the
+  journal mode to WAL, or setting a page size on an empty database, writes the
+  header, which fails on a connection opened with SQLITE_OPEN_READONLY.
+  Read-only connections skip them; the remaining pragmas are
+  connection-local and safe to set."
+  #{:journal_mode :page_size})
+
+(defn pragma->set-pragma-query
+  ([pragma]
+   (pragma->set-pragma-query pragma false))
+  ([pragma read-only]
+   (->> (merge default-pragma pragma)
+        (remove (fn [[k _]]
+                  (and read-only (contains? read-only-skipped-pragmas k))))
+        (mapv (fn [[k v]] [(str "pragma " (name k) "=" v)])))))
 
 (defn no-unwrap-result-set-fn
   [_col-metadata result-set]
@@ -206,7 +219,7 @@
                          :stmt-cache            statement-cache
                          :default-result-set-fn default-result-set-fn}]
     (set-limits conn limits)
-    (->> (pragma->set-pragma-query pragma)
+    (->> (pragma->set-pragma-query pragma read-only)
       (run! #(q* conn % default-result-set-fn)))
     conn))
 
@@ -233,8 +246,13 @@
 
 (defn init-db!
   "A db consists of a read pool of size :pool-size and a write pool of size 1.
-  The same pragma are set for both pools."
-  [url & [{:keys [pool-size pragma writer-pragma vfs
+  The same pragma are set for both pools.
+
+  When :read-only is true, every connection — the writer pool included —
+  opens with SQLITE_OPEN_READONLY, so writes through any connection fail at
+  the SQLite level. Read-only connections skip the :journal_mode and
+  :page_size pragmas, which can require a database header write."
+  [url & [{:keys [pool-size pragma writer-pragma read-only vfs
                   default-result-set-fn limits writer-limits]
            :or   {default-result-set-fn unwrap-result-set-fn
                   pool-size (Runtime/.availableProcessors
@@ -244,6 +262,7 @@
         writer
         (init-pool! url
           {:pool-size             1
+           :read-only             read-only
            :pragma                (merge pragma writer-pragma)
            :limits                (merge limits writer-limits)
            :vfs                   vfs

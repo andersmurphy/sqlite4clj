@@ -2,7 +2,7 @@
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
    [sqlite4clj.core :as d]
-   [sqlite4clj.test-common :refer [test-db test-fixture with-db]]))
+   [sqlite4clj.test-common :refer [test-db test-db-path test-fixture with-db]]))
 
 (use-fixtures :once test-fixture)
 
@@ -140,3 +140,31 @@
             #"too many attached databases - max 0"
             (d/q (:reader db)
               ["ATTACH DATABASE 'test-data/test.db' AS other"]))))))
+
+(deftest read-only-db-init
+  (testing "A db opened with :read-only true serves reads and rejects writes
+            through the writer pool."
+    (with-db [db (test-db)]
+      (d/q (:writer db) ["create table ro (id integer primary key, data text)"])
+      (d/q (:writer db) ["insert into ro (id, data) values (1, 'one')"]))
+    (with-db [db (d/init-db! test-db-path {:pool-size 2 :read-only true})]
+      (is (= [1] (d/q (:reader db) ["select id from ro"])))
+      (is (= [1] (d/q (:writer db) ["select id from ro"])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+            #"readonly database"
+            (d/q (:writer db)
+              ["insert into ro (id, data) values (2, 'two')"]))))))
+
+(deftest read-only-opens-rollback-journal-dbs
+  (testing "Read-only connections skip journal_mode and page_size pragmas, so
+            a rollback-journal database opens read-only without error."
+    ;; A file of its own: journal_mode=delete cannot be set on a database
+    ;; with a leftover write-ahead log, and earlier tests leave the shared
+    ;; test.db in WAL mode.
+    (let [path "test-data/rollback-test.db"]
+      (with-db [db (d/init-db! path {:pool-size 2 :pragma {:journal_mode "delete"}})]
+        (d/q (:writer db) ["create table ro_journal (id integer primary key)"])
+        (d/q (:writer db) ["insert into ro_journal (id) values (1)"]))
+      (with-db [db (d/init-db! path {:pool-size 2 :read-only true})]
+        (is (= [1] (d/q (:reader db) ["select id from ro_journal"])))
+        (is (= "delete" (first (d/q (:writer db) ["pragma journal_mode"]))))))))

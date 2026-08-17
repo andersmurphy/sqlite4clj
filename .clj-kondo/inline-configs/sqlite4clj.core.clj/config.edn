@@ -1,0 +1,1 @@
+{:lint-as {sqlite4clj.core/with-stmt-reset clojure.core/with-open, sqlite4clj.core/with-conn clojure.core/with-open, sqlite4clj.core/with-read-tx clojure.core/with-open, sqlite4clj.core/with-write-tx clojure.core/with-open}}
