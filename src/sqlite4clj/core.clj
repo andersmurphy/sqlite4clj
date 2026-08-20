@@ -113,7 +113,7 @@
       (with-stmt-reset [stmt stmt]
         (let [n-cols        (int
                               #_{:clj-kondo/ignore [:type-mismatch]}
-                       (api/column-count stmt))
+                              (api/column-count stmt))
               result-set-fn (or result-set-fn (:default-result-set-fn conn))]
           (result-set-fn col-metadata
             (reify
@@ -134,19 +134,19 @@
                                 :params (subvec query 1)})))))))))))))
 
 (def default-pragma
-  {:cache_size         15625
-   :page_size          4096
-   :journal_mode       "WAL"
-   :synchronous        "NORMAL"
-   :temp_store         "MEMORY"
-   :foreign_keys       false
+  {:cache_size   15625
+   :page_size    4096
+   :journal_mode "WAL"
+   :synchronous  "NORMAL"
+   :temp_store   "MEMORY"
+   :foreign_keys false
    ;; Because of WAL and a single writer at the application level
    ;; SQLITE_BUSY error should almost never happen, see:
    ;; https://sqlite.org/wal.html#sometimes_queries_return_sqlite_busy_in_wal_mode
    ;; However, sometime when using litestream for backups it can happen.
    ;; So we set it to the recommended value see:
    ;;  https://litestream.io/tips/#busy-timeout
-   :busy_timeout       5000
+   :busy_timeout 5000
    ;; :optimize cannot be run on connection open when using application
    ;; function in indexes. As you will get a unknown function error.
    ;; https://sqlite.org/pragma.html#pragma_optimize
@@ -214,7 +214,7 @@
   [db-name & [{:keys [pool-size]
                :or   {pool-size
                       (Runtime/.availableProcessors (Runtime/getRuntime))}
-               :as opts}]]
+               :as   opts}]]
   (let [conns (repeatedly pool-size
                 (fn [] (new-conn! db-name opts)))
         pool  (LinkedBlockingQueue/new ^int pool-size)]
@@ -237,8 +237,8 @@
   [url & [{:keys [pool-size pragma writer-pragma vfs
                   default-result-set-fn limits writer-limits]
            :or   {default-result-set-fn unwrap-result-set-fn
-                  pool-size (Runtime/.availableProcessors
-                              (Runtime/getRuntime))}}]]
+                  pool-size             (* 2 (Runtime/.availableProcessors
+                                               (Runtime/getRuntime)))}}]]
   (assert (< 0 pool-size))
   (let [;; Only one write connection
         writer
@@ -252,12 +252,12 @@
         reader (if (= ":memory:" url)
                  writer
                  (init-pool! url
-                             {:read-only true
-                              :pool-size pool-size
-                              :pragma    pragma
-                              :limits    limits
-                              :vfs       vfs
-                              :default-result-set-fn default-result-set-fn}))]
+                   {:read-only             true
+                    :pool-size             pool-size
+                    :pragma                pragma
+                    :limits                limits
+                    :vfs                   vfs
+                    :default-result-set-fn default-result-set-fn}))]
     {:writer   writer
      :reader   reader
      ;; Prevents application function callback pointers from getting
