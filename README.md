@@ -318,49 +318,6 @@ The index will be used if you add the `where entity_type(data) is not null` clau
 ;; [[4 0 215 "SCAN entity USING INDEX entity_type_idx"]]
 ```
 
-## Replication and backups with litestream
-
-[Litestream](https://litestream.io/) is an amazing open source SQLite replication tool that lets you to stream backups to S3 compatible object storage.
-
-If litestream is installed on your system ([see installation instructions for details](https://litestream.io/install/ )) you can start replication/ restoration on application start with `sqlite4clj.litestream/restore-then-replicate!`.
-
-```clojure
-(litestream/restore-then-replicate! db-name
-  {:s3-access-key-id     "XXXXXXXXXXXXXXX"
-   :s3-access-secret-key "XXXXXXXXXXXXXXX"
-   :bucket               "BUCKET NAME"
-   :endpoint             "S3 URL"
-   :region               "REGION"})
-```
-
-By default this will throw an error if backups/replication is not working correctly (to crash your application).
-
-It will automatically attempt to restore db from replica if db does not already exist. The process is started as a JVM sub process and will be cleaned up when the application terminates.
-
-Returns the java.lang.Process that you can monitor, in the unlikely event that the litestream process crashes you can restart it by running `restore-then-replicate!`.
-
-sqlite4clj tries to keep its dependencies to a minimum so doesn't support complex yaml generation (which would require adding something like [clj-yaml](https://github.com/clj-commons/clj-yaml) as a dependency). If the built in config generation doesn't support your needs you can supply your own litestream config string using the `config-yml` option. Worth remembering JSON is valid YAML.
-
-So something like this should work:
-
-```clojure
-(litestream/restore-then-replicate! db-name
-  {:s3-access-key-id     (env :s3-access-key-id)
-   :s3-access-secret-key (env :s3-access-secret-key)
-   :config-yml
-   (edn->json
-     {:dbs
-      [{:path db-name
-        :replicas
-        [{:type          "s3"
-          :bucket        "hyperlith"
-          :endpoint      "https://nbg1.your-objectstorage.com"
-          :region        "nbg1"
-          :sync-interval "1s"}]}]}
-     ;; important not to escape slashes for this to work
-     :escape-slash false)})
-```
-
 ## Memory observability
 
 The bundled SQLite binaries are compiled with `SQLITE_DEFAULT_MEMSTATUS=0` for

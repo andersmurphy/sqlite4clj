@@ -143,9 +143,7 @@
    ;; Because of WAL and a single writer at the application level
    ;; SQLITE_BUSY error should almost never happen, see:
    ;; https://sqlite.org/wal.html#sometimes_queries_return_sqlite_busy_in_wal_mode
-   ;; However, sometime when using litestream for backups it can happen.
-   ;; So we set it to the recommended value see:
-   ;;  https://litestream.io/tips/#busy-timeout
+   ;; However, they can happen if multiple process access the db
    :busy_timeout 5000
    ;; :optimize cannot be run on connection open when using application
    ;; function in indexes. As you will get a unknown function error.
