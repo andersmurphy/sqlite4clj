@@ -1,0 +1,1 @@
+{:lint-as {sqlite4clj.test-common/with-db clojure.core/with-open}}
