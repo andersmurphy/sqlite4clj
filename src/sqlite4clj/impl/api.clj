@@ -63,15 +63,19 @@
 (defn load-system-library []
   (ffi/load-system-library "sqlite3"))
 
-;; Load appropriate SQLite library
-(let [src (System/getProperty "sqlite4clj.native-lib")]
-  (cond
-    ;; default to bundled
-    (or (nil? src)
-      (= src "bundled")) (load-bundled-library)
-    (= src "system")     (load-system-library)
-    :else
-    (ffi-wrapper/set-library! src)))
+;; Load the SQLite library once per JVM. A namespace reload must not load a
+;; second copy: the binaries are built with SQLITE_OMIT_AUTOINIT, so a new
+;; copy starts uninitialized, and every open handle belongs to the first copy.
+(defonce native-library
+  (let [src (System/getProperty "sqlite4clj.native-lib")]
+    (cond
+      ;; default to bundled
+      (or (nil? src)
+        (= src "bundled")) (load-bundled-library)
+      (= src "system")     (load-system-library)
+      :else
+      (ffi-wrapper/set-library! src))
+    (or src "bundled")))
 
 (defcfn initialize
   sqlite3_initialize

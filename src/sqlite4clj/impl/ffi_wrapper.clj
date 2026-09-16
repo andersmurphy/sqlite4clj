@@ -6,7 +6,9 @@
 (defonce ^Arena sqlite-lookup-arena
   (Arena/global))
 
-(def lookup_ (atom nil))
+;; Survives namespace reloads so re-evaluated defcfn forms bind to the
+;; library copy that is already loaded and initialized.
+(defonce lookup_ (atom nil))
 
 (defn set-library! [file-name]
   (reset! lookup_

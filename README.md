@@ -355,6 +355,7 @@ If you want to provide your own native library then specify the `sqlite4clj.nati
 
 - `-Dsqlite4clj.native-lib=bundled`, uses the pre-built library (default if property is omitted)
   The bundled library is extracted to a unique temporary file under `java.io.tmpdir` and deleted after it loads.
+  The library is loaded once per JVM, and reloading the `sqlite4clj.impl.api` namespace reuses the loaded copy.
 - `-Dsqlite4clj.native-lib=system`, loads the sqlite3 library from the `java.library.path` (which includes `LD_LIBRARY_PATH`)
 - `-Dsqlite4clj.native-lib=/path/to/libsqlite3.so`, the value is interpreted as a path to a file that is loaded directly
 
