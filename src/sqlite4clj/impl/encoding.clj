@@ -1,5 +1,5 @@
 (ns sqlite4clj.impl.encoding
-  (:require [coffi.mem :as mem]
+  (:require [babashka.ffi :as ffi]
             [fast-edn.core :as edn])
   (:import [java.lang.foreign MemorySegment SegmentAllocator]))
 
@@ -12,7 +12,7 @@
   ;; Read exactly `size` bytes from the BLOB payload. Relying on C-string
   ;; null terminators can leak random trailing bytes into EDN decoding.
   (edn/read-string
-    (String. (.toArray (mem/slice blob 0 size)
+    (String. (.toArray (ffi/slice blob 0 size)
                java.lang.foreign.ValueLayout/JAVA_BYTE)
       "UTF-8")))
 
@@ -27,15 +27,15 @@
         b-l          (alength ^bytes b)
         total        (unchecked-inc-int b-l)
         segment      (SegmentAllocator/.allocate arena (long total))]
-    (mem/write-byte segment leading-byte)
-    (mem/write-bytes segment b-l 1 ^bytes b)
+    (ffi/write segment :byte leading-byte)
+    (ffi/write-array segment :byte b 1)
     segment))
 
 (defn decode [blob size]
   (if (pos? size)
     ;; case does not work with bytes!
-    (let [f-byte (mem/read-byte blob)
-          blob   (mem/slice blob 1)]
+    (let [f-byte (ffi/read blob :byte)
+          blob   (ffi/slice blob 1)]
       (if (= f-byte ENCODED_BLOB)
         (decode-edn blob (dec size))
         ;; Otherwise

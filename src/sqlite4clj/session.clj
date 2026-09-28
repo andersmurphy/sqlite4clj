@@ -1,89 +1,75 @@
 (ns sqlite4clj.session
   (:require
-   [sqlite4clj.impl.ffi-wrapper :as ffi-wraper :refer [defcfn]]
-   [coffi.ffi :as ffi]
-   [coffi.mem :as mem]
-   [sqlite4clj.impl.api :as api]
-   [sqlite4clj.core :as d]))
+   [babashka.ffi :as ffi]
+   [sqlite4clj.core :as d]
+   [sqlite4clj.impl.api :as api]))
 
 ;; -----------------------------
 ;; SESSION extension
 ;; https://sqlite.org/sessionintro.html
 
-(defcfn session-create
+(ffi/defcfn session-create {:library api/sqlite-library}
   "sqlite3session_create"
-  [::mem/pointer ::mem/c-string ::mem/pointer] ::mem/int
+  [:pointer :string :pointer] :int
   sqlite3session-create-native
   [pdb]
-  (with-open [arena (mem/confined-arena)]
-    (let [ppSession (mem/alloc-instance ::mem/pointer arena)
+  (with-open [arena (ffi/confined-arena)]
+    (let [ppSession (ffi/alloc arena :pointer)
           code      (sqlite3session-create-native pdb "main" ppSession)]
       (if (api/sqlite-ok? code)
-        (mem/deserialize-from ppSession ::mem/pointer)
+        (ffi/read ppSession :pointer)
         (throw (api/sqlite-ex-info pdb code {}))))))
 
-(defcfn session-attach
-  sqlite3session_attach
-  [::mem/pointer ::mem/c-string] ::mem/int)
+(ffi/defcfn session-attach {:library api/sqlite-library}
+  "sqlite3session_attach"
+  [:pointer :string] :int)
 
-(defcfn session-delete
-  sqlite3session_delete
-  [::mem/pointer] ::mem/int)
+(ffi/defcfn session-delete {:library api/sqlite-library}
+  "sqlite3session_delete"
+  [:pointer] :void)
 
-(defcfn session-changeset
+(ffi/defcfn session-changeset {:library api/sqlite-library}
   "sqlite3session_changeset"
-  [::mem/pointer ::mem/pointer ::mem/pointer] ::mem/int
+  [:pointer :pointer :pointer] :int
   sqlite3session-patchset-native
   [pdb pSession]
-  (with-open [arena (mem/confined-arena)]
-    (let [pnPatchset (mem/alloc-instance ::mem/int arena)
-          ppPatchset (mem/alloc-instance ::mem/pointer arena)
+  (with-open [arena (ffi/confined-arena)]
+    (let [pnPatchset (ffi/alloc arena :int)
+          ppPatchset (ffi/alloc arena :pointer)
           code       (sqlite3session-patchset-native pSession
                        pnPatchset
                        ppPatchset)]
       (if (api/sqlite-ok? code)
-        [(mem/deserialize-from pnPatchset ::mem/int)
-         (mem/deserialize-from ppPatchset ::mem/pointer)]
+        [(ffi/read pnPatchset :int)
+         (ffi/read ppPatchset :pointer)]
         (throw (api/sqlite-ex-info pdb code {}))))))
 
-(defcfn changeset-invert
+(ffi/defcfn changeset-invert {:library api/sqlite-library}
   "sqlite3changeset_invert"
-  [::mem/int ::mem/pointer
-   ::mem/pointer ::mem/pointer] ::mem/int
+  [:int :pointer
+   :pointer :pointer] :int
   sqlite3changeset-invert-native
   [pdb nInSet pInSet]
-  (with-open [arena (mem/confined-arena)]
-    (let [pnOutSet (mem/alloc-instance ::mem/int arena)
-          ppOutSet (mem/alloc-instance ::mem/pointer arena)
+  (with-open [arena (ffi/confined-arena)]
+    (let [pnOutSet (ffi/alloc arena :int)
+          ppOutSet (ffi/alloc arena :pointer)
           code     (sqlite3changeset-invert-native
                      nInSet pInSet
                      pnOutSet ppOutSet)]
       (if (api/sqlite-ok? code)
-        [(mem/deserialize-from pnOutSet ::mem/int)
-         (mem/deserialize-from ppOutSet ::mem/pointer)]
+        [(ffi/read pnOutSet :int)
+         (ffi/read ppOutSet :pointer)]
         (throw (api/sqlite-ex-info pdb code {}))))))
 
-(defcfn changeset-apply
-  sqlite3changeset_apply
-  [::mem/pointer ;; db
-   ::mem/int     ;; size of changeset
-   ::mem/pointer ;; changeset
-   ::mem/pointer ;; xFilter
-   ::mem/pointer ;; xConflict
-   ::mem/pointer ;; First arg to conflict
-   ] ::mem/int)
-
-(defcfn session-create
-  "sqlite3session_create"
-  [::mem/pointer ::mem/c-string ::mem/pointer] ::mem/int
-  sqlite3session-create-native
-  [pdb]
-  (with-open [arena (mem/confined-arena)]
-    (let [ppSession (mem/alloc-instance ::mem/pointer arena)
-          code      (sqlite3session-create-native pdb "main" ppSession)]
-      (if (api/sqlite-ok? code)
-        (mem/deserialize-from ppSession ::mem/pointer)
-        (throw (api/sqlite-ex-info pdb code {}))))))
+(ffi/defcfn changeset-apply {:library api/sqlite-library}
+  "sqlite3changeset_apply"
+  [:pointer ;; db
+   :int     ;; size of changeset
+   :pointer ;; changeset
+   :pointer ;; xFilter
+   :pointer ;; xConflict
+   :pointer ;; First arg to conflict
+   ] :int)
 
 (defn new-session
   "Creates a session and attaches it to the database."
@@ -109,71 +95,67 @@
             [nSet pSet]             (session-changeset pdb pSession)
             _                       (session-delete pSession)
             [nInvertSet pInvertSet] (changeset-invert pdb nSet pSet)]
-        (with-open [arena (mem/confined-arena)]
+        (with-open [arena (ffi/confined-arena)]
           (let [x-conflict
                 ;; Fails if there's a conflict (there should never be a conflict)
                 ;; when using undo-session correctly.
-                (mem/serialize (fn [_ _ _] (int 0))
-                  [::ffi/fn
-                   [::mem/pointer ::mem/int ::mem/pointer]
-                   ::mem/int
-                   :raw-fn? true]
-                  arena)]
+                (ffi/callback arena (fn [_ _ _] (int 0))
+                  [:pointer :int :pointer] :int)]
             (changeset-apply pdb nInvertSet pInvertSet nil x-conflict nil)))
         (api/free pSet)
         (api/free pInvertSet)
         (reset! session nil)))))
 
-(defcfn changeset-start
+(ffi/defcfn changeset-start {:library api/sqlite-library}
   "sqlite3changeset_start"
-  [::mem/pointer ;; changeset iterator
-   ::mem/int     ;; size of changeset
-   ::mem/pointer ;; changeset
-   ] ::mem/int
+  [:pointer ;; changeset iterator
+   :int     ;; size of changeset
+   :pointer ;; changeset
+   ] :int
   sqlite3session-changeset-start-native
   [pdb nSet pSet]
-  (with-open [arena (mem/confined-arena)]
-    (let [ppChangesetIter (mem/alloc-instance ::mem/pointer arena)
+  (with-open [arena (ffi/confined-arena)]
+    (let [ppChangesetIter (ffi/alloc arena :pointer)
           code            (sqlite3session-changeset-start-native
                             ppChangesetIter nSet pSet)]
       (if (api/sqlite-ok? code)
-        (mem/deserialize-from ppChangesetIter ::mem/pointer)
+        (ffi/read ppChangesetIter :pointer)
         (throw (api/sqlite-ex-info pdb code {}))))))
 
-(defcfn changeset-next
-  sqlite3changeset_next [::mem/pointer] ::mem/int)
+(ffi/defcfn changeset-next {:library api/sqlite-library}
+  "sqlite3changeset_next" [:pointer] :int)
 
 (def op->statemen {18 "INSERT" 9  "DELETE" 23 "UPDATE"})
 
-(defcfn changeset-op
+(ffi/defcfn changeset-op {:library api/sqlite-library}
   "sqlite3changeset_op"
-  [::mem/pointer ;; IN: changeset iterator
-   ::mem/pointer ;; OUT: table name
-   ::mem/pointer ;; OUT: number of columns in table
-   ::mem/pointer ;; OUT: statement
-   ::mem/pointer ;; OUT: indirect change
-   ] ::mem/int
+  [:pointer ;; IN: changeset iterator
+   :pointer ;; OUT: table name
+   :pointer ;; OUT: number of columns in table
+   :pointer ;; OUT: statement
+   :pointer ;; OUT: indirect change
+   ] :int
   sqlite3changeset-op-native
   [pdb pChangesetIter]
-  (with-open [arena (mem/confined-arena)]
-    (let [pzTab      (mem/alloc-instance ::mem/pointer arena)
-          pnCol      (mem/alloc-instance ::mem/pointer arena)
-          pOp        (mem/alloc-instance ::mem/pointer arena)
-          pbIndirect (mem/alloc-instance ::mem/pointer arena)
+  (with-open [arena (ffi/confined-arena)]
+    (let [pzTab      (ffi/alloc arena :pointer)
+          pnCol      (ffi/alloc arena :int)
+          pOp        (ffi/alloc arena :int)
+          pbIndirect (ffi/alloc arena :int)
 
           code (sqlite3changeset-op-native
                  pChangesetIter pzTab pnCol pOp pbIndirect)]
       (if (api/sqlite-ok? code)
-        [(mem/deserialize-from pzTab      ::mem/c-string)
-         (mem/deserialize-from pnCol      ::mem/int)
-         (-> (mem/deserialize-from pOp        ::mem/int)
+        [(ffi/read pzTab :string)
+         (ffi/read pnCol :int)
+         (-> (ffi/read pOp :int)
              op->statemen)
-         (if (= (mem/deserialize-from pbIndirect ::mem/int) 0)
+         (if (= (ffi/read pbIndirect :int) 0)
            false true)]
         (throw (api/sqlite-ex-info pdb code {}))))))
 
-(defcfn changeset-finalize
-  sqlite3changeset_finalize [::mem/pointer] ::mem/int)
+(ffi/defcfn changeset-finalize {:library api/sqlite-library}
+  "sqlite3changeset_finalize" [:pointer] :int)
 
 (defn view-session-changeset
   "Returns changeset data from session as edn."

@@ -1,7 +1,6 @@
 (ns sqlite4clj.impl.functions
   (:require
-   [coffi.ffi :as ffi]
-   [coffi.mem :as mem]
+   [babashka.ffi :as ffi]
    [sqlite4clj.impl.api :as api])
   (:import
    [java.lang.reflect Method]))
@@ -66,15 +65,15 @@
 (defn deserialize-argv
   "Extract sqlite3_value pointers from argv array"
   [argv argc]
-  (if (or (mem/null? argv) (zero? argc))
+  (if (or (ffi/null? argv) (zero? argc))
     []
     (let [;; Reinterpret argv as an array of pointers with the correct size
           argc-int     (int argc)
-          ptr-size     8
-          argv-segment (mem/reinterpret argv (* argc-int ptr-size))]
+          ptr-size     (ffi/sizeof :pointer)
+          argv-segment (ffi/reinterpret argv (* argc-int ptr-size))]
       (mapv (fn [i]
               ;; Read each pointer from the array
-              (mem/read-address argv-segment ^long (* i ptr-size)))
+              (ffi/read argv-segment :pointer (* i ptr-size)))
         (range argc-int)))))
 
 (defn value->clj
@@ -116,8 +115,8 @@
     (fn [conn]
       (let [pdb  (:pdb conn)
             ;; "To delete an existing SQL function or aggregate, pass NULL pointers for all three function callbacks."
-            code (api/create-function-v2 pdb name arity flags mem/null
-                   mem/null mem/null mem/null mem/null)]
+            code (api/create-function-v2 pdb name arity flags ffi/null
+                   ffi/null ffi/null ffi/null ffi/null)]
         (when-not (api/sqlite-ok? code)
           (throw (api/sqlite-ex-info pdb code {:function name})))))))
 
@@ -174,17 +173,13 @@
             (fn [n]
               (let [arity        (if (= n :variadic) -1 n)
                     callback     (wrap-scalar-function f)
-                    callback-ptr (mem/serialize callback
-                                   [::ffi/fn
-                                    [::mem/pointer ::mem/int ::mem/pointer]
-                                    ::mem/void
-                                    :raw-fn? true]
-                                   (mem/global-arena))]
+                    callback-ptr (ffi/callback (ffi/global-arena) callback
+                                   [:pointer :int :pointer] :void)]
                 (doto-connections db
                   (fn [conn]
                     (let [pdb  (:pdb conn)
-                          code (api/create-function-v2 pdb name arity flags-bitmask mem/null
-                                 callback-ptr mem/null mem/null mem/null)]
+                          code (api/create-function-v2 pdb name arity flags-bitmask ffi/null
+                                 callback-ptr ffi/null ffi/null ffi/null)]
                       (when-not (api/sqlite-ok? code)
                         (throw (api/sqlite-ex-info pdb code {:function name}))))))
                 [arity {:flags        flags-bitmask

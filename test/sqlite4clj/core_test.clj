@@ -6,6 +6,36 @@
 
 (use-fixtures :once test-fixture)
 
+(deftest native-values-round-trip
+  (with-db [db (test-db)]
+    (doseq [value [Long/MIN_VALUE Long/MAX_VALUE 1.25 "世界 🌍" "" nil]]
+      (is (= [value] (d/q (:writer db) ["SELECT ?" value]))))
+    (let [[[native-empty encoded-empty]]
+          (d/q (:writer db) ["SELECT x'', ?" (byte-array 0)])]
+      (is (= [[] []] [(vec native-empty) (vec encoded-empty)])))))
+
+(deftest decoded-blobs-outlive-their-database
+  (let [captured (atom [])
+        raw-values [[] [0 -1 0 127] (vec (range 64))]
+        documents (mapv (fn [id] {:id id :text "世界" :tags [:a :b]}) (range 3))
+        rows
+        (with-db [db (d/init-db! ":memory:" {:pool-size 1})]
+          (d/q (:writer db) ["CREATE TABLE retained_blobs (id INTEGER PRIMARY KEY, raw BLOB, data BLOB)"])
+          (doseq [id (range 3)]
+            (d/q (:writer db) ["INSERT INTO retained_blobs VALUES (?, ?, ?)"
+                              id (byte-array (raw-values id)) (documents id)]))
+          (d/create-function db "retain_blob"
+            (fn [v] (swap! captured conj v) 0) {:arity 1})
+          (let [rows (d/q (:writer db)
+                       ["SELECT raw, data, retain_blob(raw), retain_blob(data) FROM retained_blobs ORDER BY id"])]
+            (d/q (:writer db) ["UPDATE retained_blobs SET raw = ?, data = ?"
+                              (byte-array [9]) {:replaced true}])
+            rows))]
+    (is (= (mapv vector raw-values documents)
+           (mapv (fn [[raw data]] [(vec raw) data]) rows)))
+    (is (= (vec (interleave raw-values documents))
+           (mapv (fn [v] (if (bytes? v) (vec v) v)) @captured)))))
+
 (deftest pool-objects-are-references
   (testing "Ensure pool objects are references to connections."
     (with-db [db (test-db)]

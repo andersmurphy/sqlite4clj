@@ -1,8 +1,6 @@
 {:paths   ["src" "resources"]
  :deps    {org.clojure/clojure       {:mvn/version "1.12.0"}
-           org.suskalo/coffi
-           {:git/url "https://github.com/IGJoshua/coffi"
-            :git/sha "03d74aedecfc7b38238f1cf8b676c1f7a00e1788"}
+           org.babashka/ffi          {:mvn/version "0.1.2"}
            org.clojure/core.cache    {:mvn/version "1.1.234"}
            io.github.tonsky/fast-edn {:mvn/version "1.1.3"}}
  :aliases {:dev    {:extra-paths ["dev" "test"]

@@ -4,7 +4,7 @@
 
 Conceptually sqlite4clj is inspired by sqlite4java a sqlite library that doesn't use the JDBC interface. The goal of sqlite4clj is to have a minimalist FFI binding to SQLite's C API using Java 22 FFI (project panama). Tighter integration with SQLite can in theory offer better performance and features not available through JDBC interfaces.
 
-By using [coffi](https://github.com/IGJoshua/coffi) to interface with SQLite's C API directly with FFI we bypass the need for: [sqlite-jdbc](https://github.com/xerial/sqlite-jdbc), [hikariCP](https://github.com/brettwooldridge/HikariCP) and [next.jdbc](https://github.com/seancorfield/next-jdbc). This massively reduces the amount of code that needs to be maintained (and a much smaller jar), allows us to use Clojure to interface with SQLite directly. It also makes it easier to add SQLite specific features. In my case I was looking to cache prepared statement for each connection (which is not possible with HikariCP) but can lead to considerable performance gains on complex queries.
+By using [babashka/ffi](https://github.com/babashka/ffi) to interface with SQLite's C API directly with FFI we bypass the need for: [sqlite-jdbc](https://github.com/xerial/sqlite-jdbc), [hikariCP](https://github.com/brettwooldridge/HikariCP) and [next.jdbc](https://github.com/seancorfield/next-jdbc). This massively reduces the amount of code that needs to be maintained (and a much smaller jar), allows us to use Clojure to interface with SQLite directly. It also makes it easier to add SQLite specific features. In my case I was looking to cache prepared statement for each connection (which is not possible with HikariCP) but can lead to considerable performance gains on complex queries.
 
 This also frees up scope for common things like binary encoding and decoding to leverage SQLite's blob type.
 
@@ -12,7 +12,7 @@ Currently, this project is very much a proof of concept. But, I'm hoping to ulti
 
 ## Usage
 
-Currently this library is not on maven so you have to add it via git deps (note: coffi requires at least Java 22):
+Currently this library is not on maven so you have to add it via git deps (note: babashka/ffi requires at least Java 22 and the JVM option `--enable-native-access=ALL-UNNAMED`):
 
 ```clojure
 andersmurphy/sqlite4clj
@@ -355,6 +355,7 @@ If you want to provide your own native library then specify the `sqlite4clj.nati
 
 - `-Dsqlite4clj.native-lib=bundled`, uses the pre-built library (default if property is omitted)
   The bundled library is extracted to a unique temporary file under `java.io.tmpdir` and deleted after it loads.
+  The library is loaded once and retained across namespace reloads. Set `sqlite4clj.native-lib` before first loading sqlite4clj; changing it requires a JVM restart.
 - `-Dsqlite4clj.native-lib=system`, loads the sqlite3 library from the `java.library.path` (which includes `LD_LIBRARY_PATH`)
 - `-Dsqlite4clj.native-lib=/path/to/libsqlite3.so`, the value is interpreted as a path to a file that is loaded directly
 
