@@ -6,5 +6,6 @@
 !.clj-kondo
 !.clj-kondo/config.edn
 !.env.edn
+!.gitattributes
 /sqlite-amalgamation/sqlite3.so
 /bench/results/
