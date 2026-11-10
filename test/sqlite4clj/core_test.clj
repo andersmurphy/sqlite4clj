@@ -1,7 +1,9 @@
 (ns sqlite4clj.core-test
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [sqlite4clj.core :as d]
+   [sqlite4clj.impl.api :as api]
    [sqlite4clj.test-common :refer [test-db test-db-path test-fixture with-db]]))
 
 (use-fixtures :once test-fixture)
@@ -198,3 +200,41 @@
       (with-db [db (d/init-db! path {:pool-size 2 :read-only true})]
         (is (= [1] (d/q (:reader db) ["select id from ro_journal"])))
         (is (= "delete" (first (d/q (:writer db) ["pragma journal_mode"]))))))))
+
+(defn- live-statements [{:keys [pdb]}]
+  (loop [stmt (api/next-stmt pdb nil)
+         n    0]
+    (if stmt
+      (recur (api/next-stmt pdb stmt) (inc n))
+      n)))
+
+(deftest the-statement-cache-finalizes-what-it-evicts
+  (with-db [db (test-db {:pool-size 1})]
+    (dotimes [n 1000]
+      (d/q (:writer db) [(str "SELECT " n)]))
+    (is (<= (live-statements (first (:connections (:writer db)))) 512))))
+
+(deftest eviction-leaves-statements-in-use
+  (testing "Queries run on the same connection while another's results are
+            read can evict its statement without finalizing it."
+    (with-db [db (test-db {:pool-size 1})]
+      (d/with-conn [conn (:writer db)]
+        (let [many-queries #(dotimes [n 600] (d/q conn [(str "SELECT " n)]))]
+          (is (= [1 2 3]
+                (d/q conn ["WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 3) SELECT x FROM n"]
+                  {:result-set-fn (fn [_ rows]
+                                    (many-queries)
+                                    (into [] (comp cat (map (fn [x] (many-queries) x))) rows))}))))))))
+
+(deftest closing-a-db-closes-its-connections
+  (let [db (test-db)]
+    (d/q (:writer db) ["CREATE TABLE IF NOT EXISTS closing (x)"])
+    (d/q (:reader db) ["SELECT * FROM closing"])
+    ((:close (:reader db)))
+    ((:close (:writer db)))
+    (testing "The last connection to close removes the write-ahead log."
+      (is (not (.exists (io/file (str test-db-path "-wal"))))))
+    (testing "Closing again does nothing."
+      ((:close (:writer db))))
+    (testing "A closed connection refuses queries."
+      (is (thrown? clojure.lang.ExceptionInfo (d/q (:writer db) ["SELECT 1"]))))))

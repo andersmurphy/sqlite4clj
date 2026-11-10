@@ -3,9 +3,9 @@
   and prepared statement caching."
   (:require
    [sqlite4clj.impl.api :as api]
-   [sqlite4clj.impl.functions :as funcs]
-   [clojure.core.cache.wrapped :as cache])
+   [sqlite4clj.impl.functions :as funcs])
   (:import
+   (java.util Collections IdentityHashMap LinkedHashMap Set)
    (java.util.concurrent BlockingQueue LinkedBlockingQueue)))
 
 (defn bind [stmt params]
@@ -36,12 +36,31 @@
                   :alias    (api/column-name stmt c)})
            (range 0 col-count)))))))
 
-(defn prepare-cached [{:keys [pdb stmt-cache]} query]
+(def ^:private stmt-cache-size 512)
+
+(defn- evict-stmts!
+  "Finalizes the oldest cached statements until the cache has room for one
+  more. Skips statements in use: a query on this connection can run while
+  another query's results are being read."
+  [{:keys [^LinkedHashMap stmt-cache ^Set stmts-in-use]}]
+  (let [it (.iterator (.values stmt-cache))]
+    (while (and (>= (.size stmt-cache) stmt-cache-size) (.hasNext it))
+      (let [{:keys [stmt]} (.next it)]
+        (when-not (.contains stmts-in-use stmt)
+          (api/finalize stmt)
+          (.remove it))))))
+
+(defn prepare-cached
+  "Must be called holding the connection's lock."
+  [{:keys [pdb ^LinkedHashMap stmt-cache] :as conn} query]
   (let [sql    (first query)
         params (subvec query 1)
         {:keys [stmt] :as m}
-        (cache/lookup-or-miss stmt-cache sql
-          (fn [_] (prepare pdb sql)))]
+        (or (.get stmt-cache sql)
+            (let [m (prepare pdb sql)]
+              (evict-stmts! conn)
+              (.put stmt-cache sql m)
+              m))]
     (bind stmt params)
     m))
 
@@ -109,29 +128,36 @@
   ;; that happens. Outside of this usage it will not come into play/cause
   ;; contention.
   (locking conn
-    (let [{:keys [stmt col-metadata]} (prepare-cached conn query)]
-      (with-stmt-reset [stmt stmt]
-        (let [n-cols        (int
-                              #_{:clj-kondo/ignore [:type-mismatch]}
-                              (api/column-count stmt))
-              result-set-fn (or result-set-fn (:default-result-set-fn conn))]
-          (result-set-fn col-metadata
-            (reify
-              clojure.lang.IReduceInit
-              (reduce [_ f init]
-                (loop [ret init]
-                  (let [code (int
-                               #_{:clj-kondo/ignore [:type-mismatch]}
-                               (api/step stmt))]
-                    (case code
-                      100 (let [result (f ret (column stmt n-cols))]
-                            (if (reduced? result)
-                              @result
-                              (recur result)))
-                      101 ret
-                      (throw (api/sqlite-ex-info (:pdb conn) code
-                               {:sql    (first query)
-                                :params (subvec query 1)})))))))))))))
+    (when @(:closed conn)
+      (throw (ex-info "Connection is closed" {:sql (first query)})))
+    (let [{:keys [stmt col-metadata]} (prepare-cached conn query)
+          ^Set stmts-in-use (:stmts-in-use conn)]
+      (.add stmts-in-use stmt)
+      (try
+        (with-stmt-reset [stmt stmt]
+          (let [n-cols        (int
+                                #_{:clj-kondo/ignore [:type-mismatch]}
+                                (api/column-count stmt))
+                result-set-fn (or result-set-fn (:default-result-set-fn conn))]
+            (result-set-fn col-metadata
+              (reify
+                clojure.lang.IReduceInit
+                (reduce [_ f init]
+                  (loop [ret init]
+                    (let [code (int
+                                 #_{:clj-kondo/ignore [:type-mismatch]}
+                                 (api/step stmt))]
+                      (case code
+                        100 (let [result (f ret (column stmt n-cols))]
+                              (if (reduced? result)
+                                @result
+                                (recur result)))
+                        101 ret
+                        (throw (api/sqlite-ex-info (:pdb conn) code
+                                 {:sql    (first query)
+                                  :params (subvec query 1)}))))))))))
+      (finally
+        (.remove stmts-in-use stmt))))))
 
 (def default-pragma
   {:cache_size   15625
@@ -212,14 +238,33 @@
                           ;; SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
                           (bit-or 0x00000002 0x00000004))
         *pdb            (api/open-v2 db-name flags vfs)
-        statement-cache (cache/fifo-cache-factory {} :threshold 512)
         conn            {:pdb                   *pdb
-                         :stmt-cache            statement-cache
+                         ;; Insertion order, so the oldest is evicted first
+                         :stmt-cache            (LinkedHashMap.)
+                         :stmts-in-use          (Collections/newSetFromMap
+                                                  (IdentityHashMap.))
+                         :closed                (volatile! false)
                          :default-result-set-fn default-result-set-fn}]
     (set-limits conn limits)
     (->> (pragma->set-pragma-query pragma read-only)
       (run! #(q* conn % default-result-set-fn)))
     conn))
+
+(defn- close-conn!
+  "Finalizes every statement on the connection, which SQLite requires before
+  it will close it, and closes it. Does nothing to a closed connection."
+  [{:keys [pdb ^LinkedHashMap stmt-cache closed] :as conn}]
+  (locking conn
+    (when-not @closed
+      (vreset! closed true)
+      (.clear stmt-cache)
+      (loop []
+        (when-let [stmt (api/next-stmt pdb nil)]
+          (api/finalize stmt)
+          (recur)))
+      (let [code (api/close pdb)]
+        (when-not (api/sqlite-ok? code)
+          (throw (api/sqlite-ex-info pdb code {})))))))
 
 (defn init-pool!
   [db-name & [{:keys [pool-size]
@@ -233,7 +278,7 @@
     {:conn-pool   pool
      :connections conns
      :close
-     (fn [] (run! (fn [conn] (api/close (:pdb conn))) conns))}))
+     (fn [] (run! close-conn! conns))}))
 
 (defn unwrap-result-set-fn
   [col-metadata result-set]

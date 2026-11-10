@@ -268,6 +268,14 @@
   "sqlite3_finalize"
   [:pointer] :int)
 
+(ffi/defcfn next-stmt {:library sqlite-library}
+  "sqlite3_next_stmt"
+  [:pointer :pointer] :pointer
+  sqlite3-next-stmt-native
+  [pdb stmt]
+  (let [next-stmt (sqlite3-next-stmt-native pdb stmt)]
+    (when-not (ffi/null? next-stmt) next-stmt)))
+
 (ffi/defcfn create-function-v2 {:library sqlite-library}
   "sqlite3_create_function_v2"
   [:pointer  ;; db
