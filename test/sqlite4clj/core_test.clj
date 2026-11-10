@@ -214,6 +214,9 @@
       (d/q (:writer db) [(str "SELECT " n)]))
     (is (<= (live-statements (first (:connections (:writer db)))) 512))))
 
+(def ^:private three-rows
+  ["WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 3) SELECT x FROM n"])
+
 (deftest eviction-leaves-statements-in-use
   (testing "Queries run on the same connection while another's results are
             read can evict its statement without finalizing it."
@@ -221,10 +224,30 @@
       (d/with-conn [conn (:writer db)]
         (let [many-queries #(dotimes [n 600] (d/q conn [(str "SELECT " n)]))]
           (is (= [1 2 3]
-                (d/q conn ["WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 3) SELECT x FROM n"]
+                (d/q conn three-rows
                   {:result-set-fn (fn [_ rows]
                                     (many-queries)
-                                    (into [] (comp cat (map (fn [x] (many-queries) x))) rows))}))))))))
+                                    (into [] (comp cat (map (fn [x] (many-queries) x))) rows))})))))))
+  (testing "The same query run inside itself gets a statement of its own."
+    (with-db [db (test-db {:pool-size 1})]
+      (d/with-conn [conn (:writer db)]
+        (is (= [[1 [1 2 3]] [2 [1 2 3]] [3 [1 2 3]]]
+              (d/q conn three-rows
+                {:result-set-fn (fn [_ rows]
+                                  (into []
+                                    (comp cat
+                                      (map (fn [x]
+                                             (let [inner (d/q conn three-rows)]
+                                               (dotimes [n 600] (d/q conn [(str "SELECT " n)]))
+                                               [x inner]))))
+                                    rows))})))))))
+
+(deftest a-result-set-is-read-only-while-its-query-runs
+  (with-db [db (test-db {:pool-size 1})]
+    (let [rows (d/q (:writer db) three-rows {:result-set-fn (fn [_ rows] rows)})]
+      (dotimes [n 600] (d/q (:writer db) [(str "SELECT " n)]))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"read after its query returned"
+            (into [] rows))))))
 
 (deftest closing-a-db-closes-its-connections
   (let [db (test-db)]
@@ -238,3 +261,42 @@
       ((:close (:writer db))))
     (testing "A closed connection refuses queries."
       (is (thrown? clojure.lang.ExceptionInfo (d/q (:writer db) ["SELECT 1"]))))))
+
+(deftest a-connection-is-not-closed-from-inside-its-own-query
+  (let [db (test-db {:pool-size 1})]
+    (is (= [1 2 3]
+          (d/q (:writer db) three-rows
+            {:result-set-fn (fn [_ rows]
+                              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"inside one of its queries"
+                                    ((:close (:writer db)))))
+                              (into [] cat rows))})))
+    ((:close (:reader db)))
+    ((:close (:writer db)))
+    (is (thrown? clojure.lang.ExceptionInfo (d/q (:writer db) ["SELECT 1"])))))
+
+(deftest a-failed-close-can-be-retried
+  (let [db     (test-db {:pool-size 2})
+        [a b]  (:connections (:reader db))
+        close  api/close
+        busy   #{(:pdb a)}]
+    (with-redefs [api/close (fn [pdb] (if (busy pdb) 5 (close pdb)))]
+      (is (thrown? clojure.lang.ExceptionInfo ((:close (:reader db))))))
+    (testing "The pool closes its other connections."
+      (is (= :closed @(:state b))))
+    (testing "The failed one refuses queries, and closes when tried again."
+      (is (thrown? clojure.lang.ExceptionInfo (d/with-conn [_ a] (d/q a ["SELECT 1"]))))
+      ((:close (:reader db)))
+      (is (= :closed @(:state a))))
+    ((:close (:writer db)))))
+
+(defn- doubled [x] (* 2 x))
+
+(deftest redefining-a-function-var-after-close-does-nothing
+  (let [db (test-db {:pool-size 1})]
+    (d/create-function db "doubled" #'doubled {:deterministic? true})
+    (is (= [4] (d/q (:writer db) ["SELECT doubled(2)"])))
+    ((:close (:reader db)))
+    ((:close (:writer db)))
+    (alter-var-root #'doubled (constantly (fn [x] (* 3 x))))
+    (alter-var-root #'doubled (constantly (fn [x] (* 2 x))))
+    (is (= :closed @(:state (first (:connections (:writer db))))))))

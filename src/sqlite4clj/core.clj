@@ -50,19 +50,19 @@
           (api/finalize stmt)
           (.remove it))))))
 
-(defn prepare-cached
-  "Must be called holding the connection's lock."
-  [{:keys [pdb ^LinkedHashMap stmt-cache] :as conn} query]
-  (let [sql    (first query)
-        params (subvec query 1)
-        {:keys [stmt] :as m}
-        (or (.get stmt-cache sql)
-            (let [m (prepare pdb sql)]
-              (evict-stmts! conn)
-              (.put stmt-cache sql m)
-              m))]
-    (bind stmt params)
-    m))
+(defn- checkout-stmt
+  "The connection's cached statement for sql, or, when a query on this
+  connection is already using that one, a statement of its own, marked
+  :uncached?, to finalize after use."
+  [{:keys [pdb ^LinkedHashMap stmt-cache ^Set stmts-in-use] :as conn} sql]
+  (if-let [m (.get stmt-cache sql)]
+    (if (.contains stmts-in-use (:stmt m))
+      (assoc (prepare pdb sql) :uncached? true)
+      m)
+    (let [m (prepare pdb sql)]
+      (evict-stmts! conn)
+      (.put stmt-cache sql m)
+      m)))
 
 (defmacro with-stmt-reset
   {:clj-kondo/lint-as 'clojure.core/with-open}
@@ -128,13 +128,15 @@
   ;; that happens. Outside of this usage it will not come into play/cause
   ;; contention.
   (locking conn
-    (when @(:closed conn)
+    (when-not (= :open @(:state conn))
       (throw (ex-info "Connection is closed" {:sql (first query)})))
-    (let [{:keys [stmt col-metadata]} (prepare-cached conn query)
-          ^Set stmts-in-use (:stmts-in-use conn)]
+    (let [{:keys [stmt col-metadata uncached?]} (checkout-stmt conn (first query))
+          ^Set stmts-in-use (:stmts-in-use conn)
+          running           (volatile! true)]
       (.add stmts-in-use stmt)
       (try
         (with-stmt-reset [stmt stmt]
+          (bind stmt (subvec query 1))
           (let [n-cols        (int
                                 #_{:clj-kondo/ignore [:type-mismatch]}
                                 (api/column-count stmt))
@@ -144,6 +146,11 @@
                 clojure.lang.IReduceInit
                 (reduce [_ f init]
                   (loop [ret init]
+                    ;; Once the query returns, its statement may be reset,
+                    ;; evicted and finalized.
+                    (when-not @running
+                      (throw (ex-info "Result set read after its query returned"
+                               {:sql (first query)})))
                     (let [code (int
                                  #_{:clj-kondo/ignore [:type-mismatch]}
                                  (api/step stmt))]
@@ -156,8 +163,11 @@
                         (throw (api/sqlite-ex-info (:pdb conn) code
                                  {:sql    (first query)
                                   :params (subvec query 1)}))))))))))
-      (finally
-        (.remove stmts-in-use stmt))))))
+        (finally
+          (vreset! running false)
+          (.remove stmts-in-use stmt)
+          (when uncached?
+            (api/finalize stmt)))))))
 
 (def default-pragma
   {:cache_size   15625
@@ -243,7 +253,8 @@
                          :stmt-cache            (LinkedHashMap.)
                          :stmts-in-use          (Collections/newSetFromMap
                                                   (IdentityHashMap.))
-                         :closed                (volatile! false)
+                         ;; :open, :closing from when close starts, :closed once it succeeds
+                         :state                 (volatile! :open)
                          :default-result-set-fn default-result-set-fn}]
     (set-limits conn limits)
     (->> (pragma->set-pragma-query pragma read-only)
@@ -252,11 +263,15 @@
 
 (defn- close-conn!
   "Finalizes every statement on the connection, which SQLite requires before
-  it will close it, and closes it. Does nothing to a closed connection."
-  [{:keys [pdb ^LinkedHashMap stmt-cache closed] :as conn}]
+  it will close it, and closes it. Does nothing to a closed connection, and
+  can be retried after it fails. Refuses to close the connection from inside
+  one of its own queries."
+  [{:keys [pdb ^LinkedHashMap stmt-cache ^Set stmts-in-use state] :as conn}]
   (locking conn
-    (when-not @closed
-      (vreset! closed true)
+    (when-not (= :closed @state)
+      (when-not (.isEmpty stmts-in-use)
+        (throw (ex-info "Can't close a connection from inside one of its queries" {})))
+      (vreset! state :closing)
       (.clear stmt-cache)
       (loop []
         (when-let [stmt (api/next-stmt pdb nil)]
@@ -264,7 +279,19 @@
           (recur)))
       (let [code (api/close pdb)]
         (when-not (api/sqlite-ok? code)
-          (throw (api/sqlite-ex-info pdb code {})))))))
+          (throw (api/sqlite-ex-info pdb code {})))
+        (vreset! state :closed)))))
+
+(defn- close-conns!
+  "Closes every connection, then throws the first failure, if any, with the
+  others suppressed in it."
+  [conns]
+  (let [[failure & more] (into [] (keep #(try (close-conn! %) nil
+                                              (catch Exception e e)))
+                           conns)]
+    (when failure
+      (run! #(.addSuppressed ^Exception failure %) more)
+      (throw failure))))
 
 (defn init-pool!
   [db-name & [{:keys [pool-size]
@@ -278,7 +305,7 @@
     {:conn-pool   pool
      :connections conns
      :close
-     (fn [] (run! close-conn! conns))}))
+     (fn [] (close-conns! conns))}))
 
 (defn unwrap-result-set-fn
   [col-metadata result-set]

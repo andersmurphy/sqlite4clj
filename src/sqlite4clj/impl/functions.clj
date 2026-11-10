@@ -105,10 +105,14 @@
           (or (.getMessage e)
             (str "Unexpected " (.getSimpleName (class e)))))))))
 
-(defn doto-connections [db f]
+(defn doto-connections
+  "Calls f on each open connection, holding its lock."
+  [db f]
   (doseq [pool [(:reader db) (:writer db)]]
     (doseq [conn (:connections pool)]
-      (f conn))))
+      (locking conn
+        (when (= :open @(:state conn))
+          (f conn))))))
 
 (defn unregister-function-callback [db name arity flags]
   (doto-connections db
